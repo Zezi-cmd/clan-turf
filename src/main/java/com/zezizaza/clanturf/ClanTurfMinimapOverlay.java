@@ -40,8 +40,8 @@ import net.runelite.api.Point;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
-import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -179,14 +179,14 @@ class ClanTurfMinimapOverlay extends Overlay
 	{
 		if (client.isResized())
 		{
-			Widget w = client.getWidget(WidgetInfo.RESIZABLE_MINIMAP_DRAW_AREA);
+			Widget w = client.getWidget(ComponentID.RESIZABLE_VIEWPORT_MINIMAP_DRAW_AREA);
 			if (w == null || w.isHidden())
 			{
-				w = client.getWidget(WidgetInfo.RESIZABLE_MINIMAP_STONES_DRAW_AREA);
+				w = client.getWidget(ComponentID.RESIZABLE_VIEWPORT_BOTTOM_LINE_MINIMAP_DRAW_AREA);
 			}
 			return w != null && !w.isHidden() ? w : null;
 		}
-		Widget w = client.getWidget(WidgetInfo.FIXED_VIEWPORT_MINIMAP_DRAW_AREA);
+		Widget w = client.getWidget(ComponentID.FIXED_VIEWPORT_MINIMAP_DRAW_AREA);
 		return w != null && !w.isHidden() ? w : null;
 	}
 }
