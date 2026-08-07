@@ -28,8 +28,6 @@ import com.google.inject.Provides;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.BufferedInputStream;
-import java.io.InputStream;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -46,10 +44,6 @@ import java.util.regex.Pattern;
 import javax.inject.Inject;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.Clip;
-import javax.sound.sampled.FloatControl;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -61,6 +55,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.events.ConfigChanged;
@@ -98,6 +93,7 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ClanTurfMinimapOverlay minimapOverlay;
 	@Inject private ClanTurfResetOverlay resetOverlay;
 	@Inject private ClanTurfTrackerOverlay trackerOverlay;
+	@Inject private AudioPlayer audioPlayer;
 
 	// The seam pays off here: both stores implement ClanTurfStore, and startUp picks one.
 	// Local = ConfigManager (your claims only). Server = synced (rivals visible).
@@ -163,9 +159,6 @@ public class ClanTurfPlugin extends Plugin
 	private volatile Color animFrom;
 	private volatile Color animTo;
 
-	/** Takeover sound, loaded once at start-up. */
-	private Clip takeoverClip;
-
 	// "Invade" world-hop: the same quick-hop dance the World Hopper plugin uses. We stage a target
 	// world, open the world switcher, and hop once it's up; a game message clears it if we can't.
 	private net.runelite.api.World quickHopTargetWorld;
@@ -214,7 +207,6 @@ public class ClanTurfPlugin extends Plugin
 			ownColorClan = config.lastOwnClan();
 			ClanTurfColors.setOverride(ownColorClan, config.clanColor());
 		}
-		loadSound();
 		refreshClaims();
 	}
 
@@ -238,11 +230,6 @@ public class ClanTurfPlugin extends Plugin
 		{
 			ClanTurfColors.removeOverride(ownColorClan);
 			ownColorClan = null;
-		}
-		if (takeoverClip != null)
-		{
-			takeoverClip.close();
-			takeoverClip = null;
 		}
 	}
 
@@ -912,60 +899,22 @@ public class ClanTurfPlugin extends Plugin
 		return currentCount > 0 ? current : maxClan;
 	}
 
-	/** Loads the takeover sound from resources once, kept open for instant replay. */
-	private void loadSound()
-	{
-		try (InputStream is = getClass().getResourceAsStream("VictoryClaim.wav"))
-		{
-			if (is == null)
-			{
-				log.warn("VictoryClaim.wav not found on the classpath");
-				return;
-			}
-			AudioInputStream ais = AudioSystem.getAudioInputStream(new BufferedInputStream(is));
-			Clip clip = AudioSystem.getClip();
-			clip.open(ais);
-			takeoverClip = clip;
-		}
-		catch (Exception e)
-		{
-			log.warn("Could not load takeover sound", e);
-		}
-	}
-
+	/**
+	 * Plays the packaged takeover sound through RuneLite's {@link AudioPlayer} (the Plugin Hub
+	 * requires this over the raw Java Sound API). Volume percent is converted to a decibel gain.
+	 */
 	private void playTakeoverSound()
 	{
-		Clip clip = takeoverClip;
-		if (clip == null)
-		{
-			return;
-		}
+		float v = Math.max(0.0001f, Math.min(1f, config.takeoverVolume() / 100f));
+		float gainDb = (float) (20.0 * Math.log10(v));
 		try
 		{
-			if (clip.isRunning())
-			{
-				clip.stop();
-			}
-			clip.setFramePosition(0);
-			setVolume(clip, config.takeoverVolume());
-			clip.start();
+			audioPlayer.play(getClass(), "VictoryClaim.wav", gainDb);
 		}
 		catch (Exception e)
 		{
 			log.debug("Takeover sound failed to play", e);
 		}
-	}
-
-	private static void setVolume(Clip clip, int volumePercent)
-	{
-		if (!clip.isControlSupported(FloatControl.Type.MASTER_GAIN))
-		{
-			return;
-		}
-		FloatControl gain = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
-		float v = Math.max(0.0001f, Math.min(1f, volumePercent / 100f));
-		float db = (float) (20.0 * Math.log10(v));
-		gain.setValue(Math.max(gain.getMinimum(), Math.min(gain.getMaximum(), db)));
 	}
 
 	/** Loads the packaged icon; falls back to a drawn placeholder if the resource is missing. */
