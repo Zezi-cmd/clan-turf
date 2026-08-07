@@ -395,14 +395,13 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(
 			keyName = "serverUrl",
 			name = "Server URL",
-			description = "Baked-in sync server address. Editable only by advanced users running their "
-					+ "own server (set it via the config file).",
-			position = 124,
-			hidden = true
+			description = "The Clan Turf sync server. Leave as-is unless you run your own. If tiles "
+					+ "aren't syncing, make sure this matches http://141.148.136.217:8080.",
+			position = 17
 	)
 	default String serverUrl()
 	{
-		return "http://137.131.45.90:8080";
+		return "http://141.148.136.217:8080";
 	}
 
 	@ConfigItem(
