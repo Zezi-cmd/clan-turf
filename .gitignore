@@ -1,0 +1,14 @@
+.gradle
+build
+.idea/
+.project
+.settings/
+.classpath
+nbactions.xml
+nb-configuration.xml
+nbproject/
+
+# Editor / mount artifacts - never commit these
+.fuse_hidden*
+*.swp
+.DS_Store
