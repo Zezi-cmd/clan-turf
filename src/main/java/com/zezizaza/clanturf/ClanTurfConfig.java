@@ -245,147 +245,168 @@ public interface ClanTurfConfig extends Config
 	// Kept as config (so values persist) but not shown in the settings panel. The animation
 	// values below were dialed in during development and are now baked in.
 
-	@ConfigItem(keyName = "barrierHeight", name = "Wall height", description = "Peak wall height.", position = 100, hidden = true)
+	@ConfigItem(keyName = "barrierHeight", name = "Wall height", description = "Peak wall height.",
+			position = 100, hidden = true)
 	@Range(max = 400)
 	default int barrierHeight()
 	{
 		return 160;
 	}
 
-	@ConfigItem(keyName = "barrierOpacity", name = "Wall opacity", description = "Wall fill opacity.", position = 101, hidden = true)
+	@ConfigItem(keyName = "barrierOpacity", name = "Wall opacity", description = "Wall fill opacity.",
+			position = 101, hidden = true)
 	@Range(max = 255)
 	default int barrierOpacity()
 	{
 		return 70;
 	}
 
-	@ConfigItem(keyName = "smallRiseMs", name = "Small rise (ms)", description = "Baked.", position = 102, hidden = true)
+	@ConfigItem(keyName = "smallRiseMs", name = "Small rise (ms)", description = "Baked.",
+			position = 102, hidden = true)
 	@Range(min = 1, max = 4000)
 	default int smallRiseMs()
 	{
 		return 250;
 	}
 
-	@ConfigItem(keyName = "smallRiseHeightPct", name = "Small rise height %", description = "Baked.", position = 103, hidden = true)
+	@ConfigItem(keyName = "smallRiseHeightPct", name = "Small rise height %", description = "Baked.",
+			position = 103, hidden = true)
 	@Range(min = 1, max = 100)
 	default int smallRiseHeightPct()
 	{
 		return 50;
 	}
 
-	@ConfigItem(keyName = "smallFallMs", name = "Small fall (ms)", description = "Baked.", position = 104, hidden = true)
+	@ConfigItem(keyName = "smallFallMs", name = "Small fall (ms)", description = "Baked.",
+			position = 104, hidden = true)
 	@Range(min = 1, max = 4000)
 	default int smallFallMs()
 	{
 		return 300;
 	}
 
-	@ConfigItem(keyName = "fullRiseMs", name = "Full rise (ms)", description = "Baked.", position = 105, hidden = true)
+	@ConfigItem(keyName = "fullRiseMs", name = "Full rise (ms)", description = "Baked.",
+			position = 105, hidden = true)
 	@Range(min = 1, max = 6000)
 	default int fullRiseMs()
 	{
 		return 600;
 	}
 
-	@ConfigItem(keyName = "holdMs", name = "Hold at top (ms)", description = "Baked.", position = 106, hidden = true)
+	@ConfigItem(keyName = "holdMs", name = "Hold at top (ms)", description = "Baked.",
+			position = 106, hidden = true)
 	@Range(max = 5000)
 	default int holdMs()
 	{
 		return 700;
 	}
 
-	@ConfigItem(keyName = "fallMs", name = "Final fall (ms)", description = "Baked.", position = 107, hidden = true)
+	@ConfigItem(keyName = "fallMs", name = "Final fall (ms)", description = "Baked.",
+			position = 107, hidden = true)
 	@Range(min = 1, max = 4000)
 	default int fallMs()
 	{
 		return 550;
 	}
 
-	@ConfigItem(keyName = "vibratoAmplitude", name = "Vibrato amount", description = "Baked.", position = 108, hidden = true)
+	@ConfigItem(keyName = "vibratoAmplitude", name = "Vibrato amount", description = "Baked.",
+			position = 108, hidden = true)
 	@Range(max = 60)
 	default int vibratoAmplitude()
 	{
 		return 10;
 	}
 
-	@ConfigItem(keyName = "vibratoFrequencyHz", name = "Vibrato speed (Hz)", description = "Baked.", position = 109, hidden = true)
+	@ConfigItem(keyName = "vibratoFrequencyHz", name = "Vibrato speed (Hz)", description = "Baked.",
+			position = 109, hidden = true)
 	@Range(min = 1, max = 40)
 	default int vibratoFrequencyHz()
 	{
 		return 15;
 	}
 
-	@ConfigItem(keyName = "vibratoDecayMs", name = "Vibrato decay (ms)", description = "Baked.", position = 110, hidden = true)
+	@ConfigItem(keyName = "vibratoDecayMs", name = "Vibrato decay (ms)", description = "Baked.",
+			position = 110, hidden = true)
 	@Range(max = 3000)
 	default int vibratoDecayMs()
 	{
 		return 800;
 	}
 
-	@ConfigItem(keyName = "vibratoStartMs", name = "Vibrato lead (ms)", description = "Baked.", position = 111, hidden = true)
+	@ConfigItem(keyName = "vibratoStartMs", name = "Vibrato lead (ms)", description = "Baked.",
+			position = 111, hidden = true)
 	@Range(max = 3000)
 	default int vibratoStartMs()
 	{
 		return 350;
 	}
 
-	@ConfigItem(keyName = "sparkleIntensity", name = "Sparkle intensity", description = "Baked.", position = 112, hidden = true)
+	@ConfigItem(keyName = "sparkleIntensity", name = "Sparkle intensity", description = "Baked.",
+			position = 112, hidden = true)
 	@Range(max = 100)
 	default int sparkleIntensity()
 	{
 		return 70;
 	}
 
-	@ConfigItem(keyName = "sparkleSpeed", name = "Sparkle speed", description = "Baked.", position = 113, hidden = true)
+	@ConfigItem(keyName = "sparkleSpeed", name = "Sparkle speed", description = "Baked.",
+			position = 113, hidden = true)
 	@Range(min = 1, max = 50)
 	default int sparkleSpeed()
 	{
 		return 10;
 	}
 
-	@ConfigItem(keyName = "bandStrips", name = "Wall bands", description = "Baked.", position = 114, hidden = true)
+	@ConfigItem(keyName = "bandStrips", name = "Wall bands", description = "Baked.",
+			position = 114, hidden = true)
 	@Range(min = 1, max = 16)
 	default int bandStrips()
 	{
 		return 5;
 	}
 
-	@ConfigItem(keyName = "bandBottomPct", name = "Band opacity: bottom %", description = "Baked.", position = 115, hidden = true)
+	@ConfigItem(keyName = "bandBottomPct", name = "Band opacity: bottom %", description = "Baked.",
+			position = 115, hidden = true)
 	@Range(max = 100)
 	default int bandBottomPct()
 	{
 		return 100;
 	}
 
-	@ConfigItem(keyName = "bandTopPct", name = "Band opacity: top %", description = "Baked.", position = 116, hidden = true)
+	@ConfigItem(keyName = "bandTopPct", name = "Band opacity: top %", description = "Baked.",
+			position = 116, hidden = true)
 	@Range(max = 100)
 	default int bandTopPct()
 	{
 		return 32;
 	}
 
-	@ConfigItem(keyName = "bandCurve", name = "Band fade curve", description = "Baked.", position = 117, hidden = true)
+	@ConfigItem(keyName = "bandCurve", name = "Band fade curve", description = "Baked.",
+			position = 117, hidden = true)
 	@Range(min = 20, max = 400)
 	default int bandCurve()
 	{
 		return 85;
 	}
 
-	@ConfigItem(keyName = "tileWallRadius", name = "Tile wall radius", description = "Baked.", position = 118, hidden = true)
+	@ConfigItem(keyName = "tileWallRadius", name = "Tile wall radius", description = "Baked.",
+			position = 118, hidden = true)
 	@Range(min = 1, max = 12)
 	default int tileWallRadius()
 	{
 		return 5;
 	}
 
-	@ConfigItem(keyName = "tileWallHeight", name = "Tile wall height", description = "Baked.", position = 119, hidden = true)
+	@ConfigItem(keyName = "tileWallHeight", name = "Tile wall height", description = "Baked.",
+			position = 119, hidden = true)
 	@Range(max = 150)
 	default int tileWallHeight()
 	{
 		return 45;
 	}
 
-	@ConfigItem(keyName = "takeoverSoundDelayMs", name = "Sound delay (ms)", description = "Baked.", position = 120, hidden = true)
+	@ConfigItem(keyName = "takeoverSoundDelayMs", name = "Sound delay (ms)", description = "Baked.",
+			position = 120, hidden = true)
 	@Range(max = 5000)
 	default int takeoverSoundDelayMs()
 	{
