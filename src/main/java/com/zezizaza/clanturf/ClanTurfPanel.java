@@ -24,6 +24,7 @@
  */
 package com.zezizaza.clanturf;
 
+import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -316,7 +317,8 @@ class ClanTurfPanel extends PluginPanel
 		double y;            // displayed top-of-row pixel (eases toward targetY)
 		double targetY;
 		int rank;            // target rank (1-based), snapped
-		boolean leaving;     // dropped out of the standings, animating to empty then removed
+		boolean leaving;     // dropped out of the standings, animating out then removed
+		double alpha = 1.0;  // row opacity; eases to 0 while leaving so it fades out, not cuts
 
 		Row(String clan, Color color, double tiles, double y)
 		{
@@ -340,6 +342,7 @@ class ClanTurfPanel extends PluginPanel
 		private static final int GAP = 4;
 		private static final int PITCH = ROW_H + GAP;
 		private static final int MIN_FILL = 6;
+		private static final int ARC = 6; // bar corner radius: mostly rectangular, lightly rounded
 		private static final double EASE = 0.25; // per-frame approach; higher = snappier
 		private static final double EPS = 0.4;
 
@@ -436,11 +439,14 @@ class ClanTurfPanel extends PluginPanel
 				Row r = it.next();
 				r.tiles += (r.targetTiles - r.tiles) * EASE;
 				r.y += (r.targetY - r.y) * EASE;
-				if (Math.abs(r.targetTiles - r.tiles) > EPS || Math.abs(r.targetY - r.y) > EPS)
+				double targetAlpha = r.leaving ? 0.0 : 1.0;
+				r.alpha += (targetAlpha - r.alpha) * EASE;
+				if (Math.abs(r.targetTiles - r.tiles) > EPS || Math.abs(r.targetY - r.y) > EPS
+						|| Math.abs(targetAlpha - r.alpha) > 0.02)
 				{
 					settled = false;
 				}
-				if (r.leaving && r.tiles < 0.5 && Math.abs(r.targetY - r.y) < 1.0)
+				if (r.leaving && r.alpha < 0.03)
 				{
 					it.remove();
 				}
@@ -492,8 +498,10 @@ class ClanTurfPanel extends PluginPanel
 
 			for (Row r : ordered)
 			{
+				g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER,
+						(float) Math.max(0.0, Math.min(1.0, r.alpha))));
 				int barY = (int) Math.round(r.y) + (ROW_H - BAR_H) / 2;
-				int arc = BAR_H;
+				int arc = ARC;
 				long shownTiles = Math.round(r.tiles);
 
 				// Track.
