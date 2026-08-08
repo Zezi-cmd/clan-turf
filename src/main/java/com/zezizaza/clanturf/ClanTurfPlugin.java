@@ -491,8 +491,23 @@ public class ClanTurfPlugin extends Plugin
 					}
 				}
 			}
+			// Runner-up: the top clan that isn't the owner (drives the "vs" display), or null.
+			String runnerUp = null;
+			int runnerUpTiles = 0;
+			for (Map.Entry<String, Integer> e : counts.entrySet())
+			{
+				if (owner != null && owner.equals(e.getKey()))
+				{
+					continue;
+				}
+				if (e.getValue() > runnerUpTiles)
+				{
+					runnerUpTiles = e.getValue();
+					runnerUp = e.getKey();
+				}
+			}
 			list.removeIf(b -> b.getWorld() == world);
-			list.add(0, new ClanTurfBattle(world, owner, ownerTiles, total));
+			list.add(0, new ClanTurfBattle(world, owner, ownerTiles, total, runnerUp, runnerUpTiles));
 		}
 		return list;
 	}

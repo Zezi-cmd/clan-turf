@@ -261,12 +261,26 @@ class ClanTurfPanel extends PluginPanel
 		JPanel row = new JPanel(new BorderLayout(6, 0));
 		row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getRunnerUp() != null ? 34 : 26));
 
-		String hex = hex(ClanTurfColors.forClan(b.getOwner()));
-		JLabel info = new JLabel("<html><b>W" + b.getWorld() + "</b> &nbsp;<span style='color:#"
-				+ hex + "'>" + escape(b.getOwner()) + "</span>&nbsp; " + b.getOwnerTiles()
-				+ (b.getOwnerTiles() == 1 ? " tile" : " tiles") + "</html>");
+		String ownerHex = hex(ClanTurfColors.forClan(b.getOwner()));
+		String ownerPart = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
+				+ "</span>&nbsp; " + b.getOwnerTiles() + tileWord(b.getOwnerTiles());
+		String html;
+		if (b.getRunnerUp() != null)
+		{
+			// Two clans contest this world: leader vs runner-up, each name in its clan color.
+			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
+			String upPart = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
+					+ "</span>&nbsp; " + b.getRunnerUpTiles() + tileWord(b.getRunnerUpTiles());
+			html = "<html><b>W" + b.getWorld() + "</b>&nbsp; " + ownerPart + "<br>vs " + upPart
+					+ "</html>";
+		}
+		else
+		{
+			html = "<html><b>W" + b.getWorld() + "</b>&nbsp; " + ownerPart + "</html>";
+		}
+		JLabel info = new JLabel(html);
 		info.setFont(FontManager.getRunescapeSmallFont());
 		info.setForeground(Color.WHITE);
 
@@ -290,6 +304,11 @@ class ClanTurfPanel extends PluginPanel
 	private static String hex(Color c)
 	{
 		return String.format("%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
+	}
+
+	private static String tileWord(int n)
+	{
+		return n == 1 ? " tile" : " tiles";
 	}
 
 	/** One clan's standing: name, color, tiles held. */

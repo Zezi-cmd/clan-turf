@@ -257,15 +257,29 @@ class HttpClanTurfStore implements ClanTurfStore
 			{
 				continue;
 			}
-			String[] f = line.split(",", 4); // world,owner,ownerTiles,totalTiles
+			// world,owner,ownerTiles,totalTiles[,runnerUp,runnerUpTiles]; the last two are optional
+			// so an older server (4 fields) still parses - the world just shows without a "vs".
+			String[] f = line.split(",", 6);
 			if (f.length < 4)
 			{
 				continue;
 			}
 			try
 			{
+				String runnerUp = null;
+				int runnerUpTiles = 0;
+				if (f.length >= 6 && !f[4].trim().isEmpty())
+				{
+					runnerUp = f[4];
+					runnerUpTiles = Integer.parseInt(f[5].trim());
+				}
+				if (runnerUpTiles <= 0)
+				{
+					runnerUp = null;
+				}
 				list.add(new ClanTurfBattle(Integer.parseInt(f[0].trim()), f[1],
-						Integer.parseInt(f[2].trim()), Integer.parseInt(f[3].trim())));
+						Integer.parseInt(f[2].trim()), Integer.parseInt(f[3].trim()),
+						runnerUp, runnerUpTiles));
 			}
 			catch (NumberFormatException ignored)
 			{

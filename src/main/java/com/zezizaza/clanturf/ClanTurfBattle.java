@@ -24,20 +24,28 @@
  */
 package com.zezizaza.clanturf;
 
-/** One active-world summary for the "active battles" board: who owns a world and by how much. */
+/**
+ * One active-world summary for the "active battles" board: the leading clan and its tile count,
+ * plus the runner-up clan (for the "vs" display), or a null runner-up if only one clan holds tiles.
+ */
 final class ClanTurfBattle
 {
 	private final int world;
 	private final String owner;
 	private final int ownerTiles;
 	private final int totalTiles;
+	private final String runnerUp;
+	private final int runnerUpTiles;
 
-	ClanTurfBattle(int world, String owner, int ownerTiles, int totalTiles)
+	ClanTurfBattle(int world, String owner, int ownerTiles, int totalTiles,
+			String runnerUp, int runnerUpTiles)
 	{
 		this.world = world;
 		this.owner = owner;
 		this.ownerTiles = ownerTiles;
 		this.totalTiles = totalTiles;
+		this.runnerUp = runnerUp;
+		this.runnerUpTiles = runnerUpTiles;
 	}
 
 	int getWorld()
@@ -58,5 +66,16 @@ final class ClanTurfBattle
 	int getTotalTiles()
 	{
 		return totalTiles;
+	}
+
+	/** The second-place clan on this world by tile count, or null if only one clan holds tiles. */
+	String getRunnerUp()
+	{
+		return runnerUp;
+	}
+
+	int getRunnerUpTiles()
+	{
+		return runnerUpTiles;
 	}
 }
