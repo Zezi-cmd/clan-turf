@@ -264,7 +264,7 @@ class ClanTurfPanel extends PluginPanel
 		String hex = hex(ClanTurfColors.forClan(b.getOwner()));
 		JLabel info = new JLabel("<html><b>W" + b.getWorld() + "</b> &nbsp;<span style='color:#"
 				+ hex + "'>" + escape(b.getOwner()) + "</span>&nbsp; " + b.getOwnerTiles()
-				+ " tiles</html>");
+				+ (b.getOwnerTiles() == 1 ? " tile" : " tiles") + "</html>");
 		info.setFont(FontManager.getRunescapeSmallFont());
 		info.setForeground(Color.WHITE);
 
