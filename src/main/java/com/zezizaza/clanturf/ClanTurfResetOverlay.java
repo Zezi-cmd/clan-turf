@@ -53,7 +53,7 @@ class ClanTurfResetOverlay extends Overlay
 	{
 		this.plugin = plugin;
 		this.config = config;
-		setPosition(OverlayPosition.TOP_CENTER);
+		setPosition(OverlayPosition.ABOVE_CHATBOX_RIGHT);
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
 	}
 

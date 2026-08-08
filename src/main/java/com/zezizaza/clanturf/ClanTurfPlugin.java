@@ -34,11 +34,9 @@ import java.time.ZonedDateTime;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
@@ -126,8 +124,9 @@ public class ClanTurfPlugin extends Plugin
 	private static final int RESET_HOUR_UTC = 0;
 	private static final int[] RESET_PING_MINUTES = {10, 5, 1};
 	private static final long RESET_PING_CLEAR_MS = 11L * 60 * 1000; // past the last ping -> arm next day
-	/** Reset-warning thresholds already fired this cycle (cleared after the reset passes). */
-	private final Set<Integer> firedResetPings = new HashSet<>();
+	/** Countdown at the previous tick, so a ping fires only on a live downward threshold crossing.
+	 * -1 = not yet baselined this cycle (login or first entry into the window). */
+	private long prevResetMs = -1L;
 
 	/** !defend<world> / !invade<world> (short forms !def / !inv accepted), case-insensitive with an
 	 * optional space (e.g. "!defend 307", "!inv307"). */
@@ -742,17 +741,25 @@ public class ClanTurfPlugin extends Plugin
 		long ms = msUntilReset();
 		if (ms > RESET_PING_CLEAR_MS)
 		{
-			firedResetPings.clear(); // outside the window -> arm for the next day
+			prevResetMs = -1L; // outside the window -> re-baseline for the next day
 			return;
+		}
+		if (prevResetMs < 0L)
+		{
+			// First tick this cycle (login or just entered the window): baseline only, so a
+			// threshold already passed before we started watching doesn't fire retroactively.
+			prevResetMs = ms;
 		}
 		for (int t : RESET_PING_MINUTES)
 		{
-			if (ms <= t * 60_000L && firedResetPings.add(t) && nearGe)
+			long mark = t * 60_000L;
+			if (prevResetMs > mark && ms <= mark && nearGe)
 			{
 				announceClan(CT_TAG + " " + WHITE + "Turf resets in " + t
 						+ (t == 1 ? " minute" : " minutes") + "!" + RESET);
 			}
 		}
+		prevResetMs = ms;
 	}
 
 	/** RRGGBB hex for a colour, for chat {@code <col=...>} tags. */
