@@ -36,15 +36,13 @@ All turf wipes every day at 00:00 UTC, so no clan sits on a permanent claim and 
 
 ## Practice offline
 
-Want to experiment without touching the live war? Turn **Use sync server** off and Clan Turf runs local-only: you see just your own claims and nothing is sent anywhere. While it's off, the **Clear my tiles** button at the bottom of the side panel turns on, so you can wipe the current world's local claims and start fresh as many times as you like.
-
-Heads up: the two controls live in different places. **Use sync server** is in the plugin settings (the wrench/settings tab), while **Clear my tiles** is at the bottom of the Clan Turf side panel. The button is always visible but stays grayed out and unclickable until the server is off, so it can never wipe shared turf.
+Want to experiment without touching the live war? Turn **Use sync server** off (in the plugin settings) and Clan Turf runs local-only: you see just your own claims and nothing is sent anywhere. With the server off, the **Clear my tiles** button at the bottom of the side panel becomes clickable, so you can wipe the current world's local claims and start fresh as often as you like. It stays grayed out while the server is on, so it can never touch shared turf.
 
 ## Tiles per hour
 
 Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracker, that shows three readouts: **Tiles Claimed** this session, your **Current TPH** (tiles per hour right now), and your **Max TPH** (the best rate you hit this session). It's a local, just-for-fun way to see how efficient your route is, and it works the same offline or live. Every claim counts, retaking a rival's tile included, so it's a running tally of your activity. Shift + right-click the box for two resets: **Reset run** zeroes the session but keeps your Max TPH, and **Reset all** wipes everything including the max. It keeps counting across world hops and relogs, so a fight that spans worlds isn't wiped; only a reset (or turning the plugin off) clears it. Drag it anywhere you like.
 
-## Also
+## Customization
 
 - **Custom clan color.** Recolor your own clan's tiles to whatever you like. It stays local, so everyone else still sees their own colors.
 

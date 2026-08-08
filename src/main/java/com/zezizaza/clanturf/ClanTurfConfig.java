@@ -28,15 +28,52 @@ import java.awt.Color;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(ConfigClanTurfStore.GROUP)
 public interface ClanTurfConfig extends Config
 {
+	@ConfigSection(
+			name = "Appearance",
+			description = "How claimed tiles, outlines, and the minimap tint look.",
+			position = 0
+	)
+	String appearanceSection = "appearanceSection";
+
+	@ConfigSection(
+			name = "Takeover",
+			description = "The GE boundary, takeover effects, and takeover announcements.",
+			position = 1
+	)
+	String takeoverSection = "takeoverSection";
+
+	@ConfigSection(
+			name = "Clan",
+			description = "Your clan color and clan chat rally commands.",
+			position = 2
+	)
+	String clanSection = "clanSection";
+
+	@ConfigSection(
+			name = "Network",
+			description = "The sync server that makes rival clans visible to each other.",
+			position = 3
+	)
+	String networkSection = "networkSection";
+
+	@ConfigSection(
+			name = "Extras",
+			description = "Reset countdown and the tiles-per-hour tracker.",
+			position = 4
+	)
+	String extrasSection = "extrasSection";
+
 	// ------------------------------------------------------------------ appearance
 
 	@ConfigItem(
 			keyName = "fillOpacity",
+			section = appearanceSection,
 			name = "Tile fill opacity",
 			description = "How solid the claimed-tile color is (0 = outline only, 255 = solid).",
 			position = 0
@@ -49,6 +86,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "drawOutline",
+			section = appearanceSection,
 			name = "Draw tile outline",
 			description = "Outline each claimed tile in its clan color.",
 			position = 1
@@ -60,6 +98,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "outlineOpacity",
+			section = appearanceSection,
 			name = "Tile outline opacity",
 			description = "How solid the tile outline / territory border is (0 = invisible, 255 = solid).",
 			position = 2
@@ -72,6 +111,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "showBoundary",
+			section = takeoverSection,
 			name = "Show GE boundary",
 			description = "Draw the GE boundary line (and the takeover animation) on screen.",
 			position = 3
@@ -83,6 +123,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "boundaryAnimation",
+			section = takeoverSection,
 			name = "Border animation",
 			description = "On: the GE boundary rises into a wall on takeover. Off: it just fades to the "
 					+ "new clan's color as a flat ground line.",
@@ -95,6 +136,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "minimapTint",
+			section = appearanceSection,
 			name = "Tint GE on minimap",
 			description = "Shade the Grand Exchange on the minimap in the current owning clan's color.",
 			position = 5
@@ -106,6 +148,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "minimapOpacity",
+			section = appearanceSection,
 			name = "Minimap opacity",
 			description = "How strong the minimap GE tint is (0 = invisible, 100 = full).",
 			position = 6
@@ -120,6 +163,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "announceTakeovers",
+			section = takeoverSection,
 			name = "Announce takeovers",
 			description = "Post a message in the clan tab when a clan takes ownership of the GE.",
 			position = 7
@@ -131,6 +175,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "takeoverSound",
+			section = takeoverSection,
 			name = "Takeover sound",
 			description = "Play a sound when a clan takes ownership of the GE.",
 			position = 8
@@ -142,6 +187,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "takeoverVolume",
+			section = takeoverSection,
 			name = "Takeover volume",
 			description = "Volume of the takeover sound (0-100%).",
 			position = 9
@@ -154,6 +200,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "tileEffects",
+			section = takeoverSection,
 			name = "Tile effects",
 			description = "Show the takeover tile effects: the shimmer on the conquering clan's tiles "
 					+ "and the small walls that rise on nearby tiles.",
@@ -166,6 +213,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "wallOnSteal",
+			section = takeoverSection,
 			name = "Wall on steal",
 			description = "Pop a short wall on a single tile the moment it's taken from a rival clan, "
 					+ "in the new owner's color. A plain fade still covers empty tiles you claim.",
@@ -180,6 +228,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "customClanColor",
+			section = clanSection,
 			name = "Custom clan color",
 			description = "Paint your own clan's tiles a color you pick instead of the auto-assigned "
 					+ "one. Local only - other players still see their own colors.",
@@ -192,6 +241,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "clanColor",
+			section = clanSection,
 			name = "Your clan color",
 			description = "Color for your own clan's tiles when 'Custom clan color' is on.",
 			position = 13
@@ -203,6 +253,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "clanChatCommands",
+			section = clanSection,
 			name = "Clan chat commands",
 			description = "Turn !defend<world> and !invade<world> typed in clan chat into formatted "
 					+ "Clan Turf calls, validated against the battles board.",
@@ -217,6 +268,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "useServer",
+			section = networkSection,
 			name = "Use sync server",
 			description = "On: syncs your claims through the server so rival clans are visible and the "
 					+ "turf war is live. This sends your clan name, the Grand Exchange tile coordinates "
@@ -232,6 +284,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "resetCountdown",
+			section = extrasSection,
 			name = "Reset countdown",
 			description = "Show an on-screen countdown to the daily turf reset, and warn in the clan "
 					+ "tab while you're at the GE, so fights aren't cut off mid-battle.",
@@ -244,6 +297,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "showTileTracker",
+			section = extrasSection,
 			name = "Tiles/hour tracker",
 			description = "Show an on-screen counter of tiles you've claimed this session and your "
 					+ "tiles-per-hour rate, so you can practice your movement. Shift + right-click it "
@@ -429,6 +483,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "serverUrl",
+			section = networkSection,
 			name = "Server URL",
 			description = "The Clan Turf sync server. Leave as-is unless you run your own. If tiles "
 					+ "aren't syncing, make sure this matches http://141.148.136.217:8080.",
