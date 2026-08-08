@@ -845,12 +845,13 @@ public class ClanTurfPlugin extends Plugin
 		{
 			if (config.announceTakeovers())
 			{
-				// Same shape as the !command calls: [CT] and the clan name in the clan's color,
-				// the rest white, so every plugin line reads consistently.
+				// Same shape as the !command calls: [CT], "Grand Exchange", and the clan name in
+				// the clan's color, the rest white, so every plugin line reads consistently.
 				String on = "<col=" + hex(ClanTurfColors.forClan(newLeader)) + ">";
 				String name = newLeader.toUpperCase(java.util.Locale.ROOT);
-				String msg = on + "[CT]" + RESET + " " + WHITE + "The Grand Exchange belongs to "
-						+ RESET + on + name + RESET + WHITE + "!" + RESET;
+				String msg = on + "[CT]" + RESET + " " + WHITE + "The " + RESET
+						+ on + "Grand Exchange" + RESET + WHITE + " belongs to " + RESET
+						+ on + name + RESET + WHITE + "!" + RESET;
 				announceClan(msg);
 			}
 			if (config.takeoverSound())
