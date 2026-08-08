@@ -129,9 +129,10 @@ public class ClanTurfPlugin extends Plugin
 	/** Reset-warning thresholds already fired this cycle (cleared after the reset passes). */
 	private final Set<Integer> firedResetPings = new HashSet<>();
 
-	/** !defend<world> / !invade<world>, case-insensitive with an optional space (e.g. "!defend 307"). */
+	/** !defend<world> / !invade<world> (short forms !def / !inv accepted), case-insensitive with an
+	 * optional space (e.g. "!defend 307", "!inv307"). */
 	private static final Pattern CT_COMMAND =
-			Pattern.compile("(?i)^\\s*!(defend|invade)\\s*(\\d{1,5})\\s*$");
+			Pattern.compile("(?i)^\\s*!(def(?:end)?|inv(?:ade)?)\\s*(\\d{1,5})\\s*$");
 	/** Tag prefixing the neutral/error Clan Turf lines. Command calls colour [CT] and the world by
 	 * the clan they're about instead (your colour to defend, the target's colour to invade). */
 	private static final String CT_TAG = "<col=ffcc33>[CT]</col>";
@@ -624,7 +625,7 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
-		boolean defend = "defend".equalsIgnoreCase(m.group(1));
+		boolean defend = m.group(1).toLowerCase(java.util.Locale.ROOT).startsWith("def");
 		int world;
 		try
 		{
