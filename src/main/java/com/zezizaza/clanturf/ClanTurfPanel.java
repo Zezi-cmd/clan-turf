@@ -259,26 +259,33 @@ class ClanTurfPanel extends PluginPanel
 	private JPanel battleRow(ClanTurfBattle b, String myClan)
 	{
 		JPanel row = new JPanel(new BorderLayout(6, 0));
-		row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+		row.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.MEDIUM_GRAY_COLOR),
+				BorderFactory.createEmptyBorder(5, 0, 5, 0)));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getRunnerUp() != null ? 34 : 26));
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getRunnerUp() != null ? 46 : 30));
 
 		String ownerHex = hex(ClanTurfColors.forClan(b.getOwner()));
-		String ownerPart = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
-				+ "</span>&nbsp; " + b.getOwnerTiles() + tileWord(b.getOwnerTiles());
+		String worldTag = "<b><span style='color:#" + ownerHex + "'>W" + b.getWorld()
+				+ "</span></b>";
+		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
+				+ "</span>&nbsp;" + b.getOwnerTiles() + tileWord(b.getOwnerTiles());
 		String html;
 		if (b.getRunnerUp() != null)
 		{
-			// Two clans contest this world: leader vs runner-up, each name in its clan color.
+			// Two clans contest this world: a table so both clan names line up, the world tag sits
+			// top-left, and "vs" sits on the right spanning both rows (vertically centered).
 			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
-			String upPart = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
-					+ "</span>&nbsp; " + b.getRunnerUpTiles() + tileWord(b.getRunnerUpTiles());
-			html = "<html><b>W" + b.getWorld() + "</b>&nbsp; " + ownerPart + "<br>vs " + upPart
-					+ "</html>";
+			String upCell = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
+					+ "</span>&nbsp;" + b.getRunnerUpTiles() + tileWord(b.getRunnerUpTiles());
+			html = "<html><table cellpadding=0 cellspacing=0>"
+					+ "<tr><td>" + worldTag + "&nbsp;</td><td>" + ownerCell
+					+ "</td><td rowspan=2 valign='middle'>&nbsp;vs&nbsp;</td></tr>"
+					+ "<tr><td></td><td>" + upCell + "</td></tr></table></html>";
 		}
 		else
 		{
-			html = "<html><b>W" + b.getWorld() + "</b>&nbsp; " + ownerPart + "</html>";
+			html = "<html>" + worldTag + "&nbsp; " + ownerCell + "</html>";
 		}
 		JLabel info = new JLabel(html);
 		info.setFont(FontManager.getRunescapeSmallFont());
