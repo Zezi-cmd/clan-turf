@@ -24,6 +24,7 @@
  */
 package com.zezizaza.clanturf;
 
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -156,7 +157,7 @@ class ClanTurfPanel extends PluginPanel
 			header.setText("Clan Turf");
 			headline.setText(message);
 			clanHint.setVisible(false);
-			board.setData(new ArrayList<>(), 0);
+			board.setData(new ArrayList<>(), 0, null);
 		});
 	}
 
@@ -214,7 +215,7 @@ class ClanTurfPanel extends PluginPanel
 						+ String.format("%.1f", gePct) + "% Stake</html>");
 			}
 
-			board.setData(ordered, totalTiles);
+			board.setData(ordered, totalTiles, myClan);
 		});
 	}
 
@@ -344,6 +345,7 @@ class ClanTurfPanel extends PluginPanel
 
 		private final LinkedHashMap<String, Row> rows = new LinkedHashMap<>();
 		private int totalTiles;
+		private String myClan;           // the player's own clan, so its bar can be highlighted
 		private double leader = 1;       // displayed leader count (denominator for bar length)
 		private double targetLeader = 1;
 		private final Timer timer;
@@ -354,9 +356,10 @@ class ClanTurfPanel extends PluginPanel
 			timer = new Timer(16, e -> tick());
 		}
 
-		void setData(List<Entry> entries, int totalTiles)
+		void setData(List<Entry> entries, int totalTiles, String myClan)
 		{
 			this.totalTiles = totalTiles;
+			this.myClan = myClan;
 			boolean wasEmpty = rows.isEmpty();
 
 			double maxT = 1;
@@ -504,12 +507,23 @@ class ClanTurfPanel extends PluginPanel
 				g2.setPaint(new GradientPaint(0, barY, top, 0, barY + BAR_H, r.color));
 				g2.fillRoundRect(0, barY, fillW, BAR_H, arc, arc);
 
-				// Outline.
-				g2.setColor(ColorScheme.MEDIUM_GRAY_COLOR);
-				g2.drawRoundRect(0, barY, w - 1, BAR_H, arc, arc);
+				// Outline - the player's own clan gets a brighter, thicker frame to stand out.
+				boolean mine = myClan != null && r.clan.equalsIgnoreCase(myClan);
+				if (mine)
+				{
+					g2.setStroke(new BasicStroke(2f));
+					g2.setColor(Color.WHITE);
+					g2.drawRoundRect(1, barY + 1, w - 3, BAR_H - 2, arc, arc);
+					g2.setStroke(new BasicStroke(1f));
+				}
+				else
+				{
+					g2.setColor(ColorScheme.MEDIUM_GRAY_COLOR);
+					g2.drawRoundRect(0, barY, w - 1, BAR_H, arc, arc);
+				}
 
 				// Rank + name (left), tiles + GE% (right), over a soft shadow for legibility.
-				String name = r.rank + ".  " + r.clan;
+				String name = r.rank + ".  " + r.clan + (mine ? "  (you)" : "");
 				double gePct = totalTiles > 0 ? shownTiles * 100.0 / totalTiles : 0.0;
 				String stat = shownTiles + "  (" + String.format("%.1f", gePct) + "%)";
 
