@@ -72,6 +72,11 @@ class ClanTurfPanel extends PluginPanel
 	private final JButton clearOfflineBtn = new JButton("Clear my tiles (offline)");
 	private final IntConsumer onInvade;
 
+	/** Sticky scoreboard order (clan names) for the current world, so tied clans hold their slot
+	 * instead of shuffling when a new clan arrives. Reset when the world changes. */
+	private int boardOrderWorld = -1;
+	private final List<String> boardOrder = new ArrayList<>();
+
 	/**
 	 * @param onInvade      hop to the given world (from an Active battles "Invade"/"Defend" button)
 	 * @param onClearOffline wipe the current world's local claims (only wired while offline)
@@ -176,20 +181,29 @@ class ClanTurfPanel extends PluginPanel
 		Map<String, Long> counts = claims.stream()
 				.collect(Collectors.groupingBy(ClanTurfPoint::getClanName, Collectors.counting()));
 
-		// Sort by tiles, but the committed owner wins ties - so at 17-17 the incumbent stays #1,
-		// exactly like the boundary. A clan only jumps to #1 once it has strictly more tiles.
-		List<Entry> ordered = counts.entrySet().stream()
-				.sorted((a, b) ->
-				{
-					boolean ac = a.getKey().equalsIgnoreCase(committedLeader);
-					boolean bc = b.getKey().equalsIgnoreCase(committedLeader);
-					if (ac != bc)
-					{
-						return ac ? -1 : 1;
-					}
-					return Long.compare(b.getValue(), a.getValue());
-				})
-				.map(e -> new Entry(e.getKey(), ClanTurfColors.forClan(e.getKey()), e.getValue()))
+		// Sticky, stable order so tied clans hold their slot instead of shuffling when a new clan
+		// arrives or ties them. The committed owner still wins ties for #1 (matches the boundary);
+		// among the rest, a clan only passes another by STRICTLY out-tiling it. Reset per world.
+		if (world != boardOrderWorld)
+		{
+			boardOrderWorld = world;
+			boardOrder.clear();
+		}
+		List<String> base = stickyBase(counts.keySet(), counts);
+		base.sort((a, b) ->
+		{
+			boolean ac = a.equalsIgnoreCase(committedLeader);
+			boolean bc = b.equalsIgnoreCase(committedLeader);
+			if (ac != bc)
+			{
+				return ac ? -1 : 1;
+			}
+			return Long.compare(counts.get(b), counts.get(a)); // stable: ties keep the sticky base
+		});
+		boardOrder.clear();
+		boardOrder.addAll(base);
+		List<Entry> ordered = base.stream()
+				.map(clan -> new Entry(clan, ClanTurfColors.forClan(clan), counts.get(clan)))
 				.collect(Collectors.toList());
 
 		long claimed = ordered.stream().mapToLong(e -> e.tiles).sum();
@@ -254,6 +268,38 @@ class ClanTurfPanel extends PluginPanel
 			battlesBox.revalidate();
 			battlesBox.repaint();
 		});
+	}
+
+	/**
+	 * The sticky base order for the scoreboard: clans shown last time keep their prior relative
+	 * order, and any new clans are appended (most tiles first, name as a stable tiebreak). The
+	 * caller then stable-sorts this by rank, so a tie holds whoever was already ahead.
+	 */
+	private List<String> stickyBase(Collection<String> clans, Map<String, Long> counts)
+	{
+		List<String> base = new ArrayList<>();
+		for (String clan : boardOrder)
+		{
+			if (clans.contains(clan) && !base.contains(clan))
+			{
+				base.add(clan);
+			}
+		}
+		List<String> fresh = new ArrayList<>();
+		for (String clan : clans)
+		{
+			if (!base.contains(clan))
+			{
+				fresh.add(clan);
+			}
+		}
+		fresh.sort((a, b) ->
+		{
+			int d = Long.compare(counts.get(b), counts.get(a));
+			return d != 0 ? d : a.compareTo(b);
+		});
+		base.addAll(fresh);
+		return base;
 	}
 
 	private JPanel battleRow(ClanTurfBattle b, String myClan)
