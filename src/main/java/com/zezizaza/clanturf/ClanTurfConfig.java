@@ -218,9 +218,11 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(
 			keyName = "useServer",
 			name = "Use sync server",
-			description = "On: sync claims through the server so rival clans are visible and the turf "
-					+ "war is live. Off: local only, you see just your own claims and nothing is sent "
-					+ "anywhere. Leave it on to actually play; off is a privacy switch.",
+			description = "On: syncs your claims through the server so rival clans are visible and the "
+					+ "turf war is live. This sends your clan name, the Grand Exchange tile coordinates "
+					+ "you claim, and your current world number - no account details or personal "
+					+ "information. Off: local only, you see just your own claims and nothing is sent "
+					+ "anywhere.",
 			position = 14
 	)
 	default boolean useServer()
