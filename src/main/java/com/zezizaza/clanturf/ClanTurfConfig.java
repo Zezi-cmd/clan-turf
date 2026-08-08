@@ -164,6 +164,18 @@ public interface ClanTurfConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+			keyName = "wallOnSteal",
+			name = "Wall on steal",
+			description = "Pop a short wall on a single tile the moment it's taken from a rival clan, "
+					+ "in the new owner's color. A plain fade still covers empty tiles you claim.",
+			position = 11
+	)
+	default boolean wallOnSteal()
+	{
+		return true;
+	}
+
 	// ------------------------------------------------------------------ clan
 
 	@ConfigItem(
@@ -171,7 +183,7 @@ public interface ClanTurfConfig extends Config
 			name = "Custom clan color",
 			description = "Paint your own clan's tiles a color you pick instead of the auto-assigned "
 					+ "one. Local only - other players still see their own colors.",
-			position = 11
+			position = 12
 	)
 	default boolean customClanColor()
 	{
@@ -182,7 +194,7 @@ public interface ClanTurfConfig extends Config
 			keyName = "clanColor",
 			name = "Your clan color",
 			description = "Color for your own clan's tiles when 'Custom clan color' is on.",
-			position = 12
+			position = 13
 	)
 	default Color clanColor()
 	{
@@ -194,7 +206,7 @@ public interface ClanTurfConfig extends Config
 			name = "Clan chat commands",
 			description = "Turn !defend<world> and !invade<world> typed in clan chat into formatted "
 					+ "Clan Turf calls, validated against the battles board.",
-			position = 13
+			position = 14
 	)
 	default boolean clanChatCommands()
 	{

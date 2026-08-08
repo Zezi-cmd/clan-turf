@@ -69,6 +69,10 @@ class ClanTurfOverlay extends Overlay
 	private static final int BOUNDARY_MARGIN = 30;
 	/** How long a newly claimed (or taken-over) tile takes to fade in, in milliseconds. */
 	private static final long FADE_IN_MS = 500;
+	/** How long the single-tile "taken from a rival" wall pop lasts, in milliseconds. */
+	private static final long STEAL_WALL_MS = 600;
+	/** Peak height of the steal-pop wall (independent of the boundary tile-wall settings). */
+	private static final int STEAL_WALL_HEIGHT = 60;
 
 	/**
 	 * Pixels a shared (clan-vs-clan) border is pulled toward its own tile, so two touching clans
@@ -109,11 +113,13 @@ class ClanTurfOverlay extends Overlay
 	{
 		final String clan;
 		final long since;
+		final boolean steal; // taken from a different clan (drives the single-tile wall-on-steal pop)
 
-		Appear(String clan, long since)
+		Appear(String clan, long since, boolean steal)
 		{
 			this.clan = clan;
 			this.since = since;
+			this.steal = steal;
 		}
 	}
 
@@ -230,7 +236,8 @@ class ClanTurfOverlay extends Overlay
 				Appear a = appearing.get(key(sx, sy));
 				if (a == null || !a.clan.equals(clan))
 				{
-					a = new Appear(clan, now);
+					// a != null here means the clan changed - the tile was taken from a rival.
+					a = new Appear(clan, now, a != null);
 					appearing.put(key(sx, sy), a);
 				}
 				double fade = fadeFactor(dist) * appearFactor(a, now); // distance ghosting + fade-in
@@ -289,6 +296,22 @@ class ClanTurfOverlay extends Overlay
 					if (wallH > 0)
 					{
 						drawTileWall(graphics, wv, lp, plane, wallH, base, fade);
+					}
+				}
+
+				// Wall-on-steal: a single short wall pops on a tile taken from a rival, rising then
+				// falling over STEAL_WALL_MS, synced to the fade - no shimmer, no radius gate.
+				if (config.wallOnSteal() && a.steal)
+				{
+					long stealEl = now - a.since;
+					if (stealEl >= 0 && stealEl < STEAL_WALL_MS)
+					{
+						double st = stealEl / (double) STEAL_WALL_MS;
+						int wallH = (int) Math.round(Math.sin(Math.PI * st) * STEAL_WALL_HEIGHT);
+						if (wallH > 0)
+						{
+							drawTileWall(graphics, wv, lp, plane, wallH, base, fade);
+						}
 					}
 				}
 
