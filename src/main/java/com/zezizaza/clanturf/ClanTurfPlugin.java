@@ -285,9 +285,18 @@ public class ClanTurfPlugin extends Plugin
 	@Subscribe
 	public void onOverlayMenuClicked(OverlayMenuClicked event)
 	{
-		if (event.getOverlay() == trackerOverlay && "Reset".equals(event.getEntry().getOption()))
+		if (event.getOverlay() != trackerOverlay)
 		{
-			resetTileSession();
+			return;
+		}
+		String option = event.getEntry().getOption();
+		if ("Reset run".equals(option))
+		{
+			resetTileRun();
+		}
+		else if ("Reset all".equals(option))
+		{
+			resetTileAll();
 		}
 	}
 
@@ -426,13 +435,19 @@ public class ClanTurfPlugin extends Plugin
 		return maxRate;
 	}
 
-	/** Wipe the tiles/hour session (right-click "Reset" on the tracker overlay). */
-	void resetTileSession()
+	/** Reset the run only: zero Claimed and Current TPH but keep Max TPH ("Reset run" on the tracker). */
+	void resetTileRun()
 	{
 		sessionClaims = 0;
 		firstClaimMs = 0L;
 		cachedRate = 0;
 		rateCalcMs = 0L;
+	}
+
+	/** Full wipe including Max TPH, matching a fresh client start ("Reset all" on the tracker). */
+	void resetTileAll()
+	{
+		resetTileRun();
 		maxRate = 0;
 	}
 

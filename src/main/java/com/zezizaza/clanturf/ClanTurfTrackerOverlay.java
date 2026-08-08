@@ -38,7 +38,8 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
 /**
  * A small, XP-tracker-style HUD box: tiles you've claimed this session and your tiles-per-hour
  * rate. Purely local and cosmetic - a practice/efficiency readout that works the same whether the
- * sync server is on or off. Right-click gives a "Reset" entry to start a fresh session.
+ * sync server is on or off. Right-click gives "Reset run" (zero Claimed and Current, keep Max) and
+ * "Reset all" (full wipe) entries.
  */
 class ClanTurfTrackerOverlay extends OverlayPanel
 {
@@ -54,7 +55,9 @@ class ClanTurfTrackerOverlay extends OverlayPanel
 		this.config = config;
 		setPosition(OverlayPosition.TOP_LEFT);
 		getMenuEntries().add(
-				new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, "Reset", "Tiles per hour"));
+				new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, "Reset run", "Tiles per hour"));
+		getMenuEntries().add(
+				new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, "Reset all", "Tiles per hour"));
 	}
 
 	@Override
