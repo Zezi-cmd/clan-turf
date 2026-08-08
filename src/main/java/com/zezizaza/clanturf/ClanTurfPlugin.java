@@ -128,6 +128,11 @@ public class ClanTurfPlugin extends Plugin
 	 * -1 = not yet baselined this cycle (login or first entry into the window). */
 	private long prevResetMs = -1L;
 
+	/** Sticky runner-up for the current world's synthesized battle row: held until another non-owner
+	 * clan STRICTLY passes it, mirroring the server's stickyRank and the leader's sticky rule. */
+	private int synthRunnerUpWorld = -1;
+	private String synthRunnerUp;
+
 	/** !defend<world> / !invade<world> (short forms !def / !inv accepted), case-insensitive with an
 	 * optional space (e.g. "!defend 307", "!inv307"). */
 	private static final Pattern CT_COMMAND =
@@ -491,9 +496,20 @@ public class ClanTurfPlugin extends Plugin
 					}
 				}
 			}
-			// Runner-up: the top clan that isn't the owner (drives the "vs" display), or null.
+			// Runner-up with the same sticky-on-tie rule as the leader and the server: keep the
+			// incumbent until another non-owner clan strictly passes it. Reset on a world change.
+			if (world != synthRunnerUpWorld)
+			{
+				synthRunnerUpWorld = world;
+				synthRunnerUp = null;
+			}
 			String runnerUp = null;
 			int runnerUpTiles = 0;
+			if (synthRunnerUp != null && !synthRunnerUp.equals(owner))
+			{
+				runnerUp = synthRunnerUp;
+				runnerUpTiles = counts.getOrDefault(synthRunnerUp, 0);
+			}
 			for (Map.Entry<String, Integer> e : counts.entrySet())
 			{
 				if (owner != null && owner.equals(e.getKey()))
@@ -506,6 +522,11 @@ public class ClanTurfPlugin extends Plugin
 					runnerUp = e.getKey();
 				}
 			}
+			if (runnerUpTiles == 0)
+			{
+				runnerUp = null;
+			}
+			synthRunnerUp = runnerUp;
 			list.removeIf(b -> b.getWorld() == world);
 			list.add(0, new ClanTurfBattle(world, owner, ownerTiles, total, runnerUp, runnerUpTiles));
 		}
