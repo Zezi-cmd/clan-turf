@@ -12,7 +12,7 @@ Step on any Grand Exchange tile to claim it for your clan. Walk onto a rival's t
 
 ## The takeover
 
-When a clan seizes the lead for the GE, the boundary rises into a colored wall that swaps to the new owner's color and settles back down, the winning clan's nearby tiles shimmer, and a call goes out in your clan tab with a sound cue. Want it subtler? A flat-line mode fades the border color without raising the wall.
+When a clan seizes the lead for the GE, the boundary rises into a colored wall that swaps to the new owner's color and settles back down, the winning clan's nearby tiles shimmer, and a call goes out in your clan tab with a sound cue. Take a single tile off a rival and a short wall pops up on just that tile in your clan's color. Want it subtler? A flat-line mode fades the border color without raising the wall.
 
 ## Live scoreboard
 
@@ -20,11 +20,11 @@ The side panel ranks every clan on your world by tiles held, with each clan's sh
 
 ## Active battles
 
-See which worlds are contested and who currently holds them. Click **Invade** to hop straight to a rival's world, or **Defend** to jump to one your clan already holds.
+See which worlds are contested, with the leading clan set against its closest rival on each world, so you can read the fight at a glance. Click **Invade** to hop straight to a rival's world, or **Defend** to jump to one your clan already holds.
 
 ## Rally your clan in chat
 
-Type `!defend 307` or `!invade 420` in clan chat and it turns into a formatted rally call in the right clan's color, checked against the live board so only real targets go through. Every Clan Turf message lands in your clan tab, so you coordinate and get plugin alerts in one place.
+Type `!defend 307` or `!invade 420` in clan chat (the short `!def` and `!inv` work too) and it turns into a formatted rally call in the right clan's color, checked against the live board so only real targets go through. Every Clan Turf message lands in your clan tab, so you coordinate and get plugin alerts in one place.
 
 ## The war on your minimap
 
@@ -32,22 +32,21 @@ The Grand Exchange is shaded on your minimap in the current owner's color, so yo
 
 ## Daily reset
 
-All turf wipes every day at 00:00 UTC, so no clan sits on a permanent claim and every day is a fresh fight. An on-screen countdown and clan warnings give you time to finish a battle before it hits.
+All turf wipes every day at 00:00 UTC, so no clan sits on a permanent claim and every day is a fresh fight. An on-screen countdown and clan warnings give you time to finish a battle before it hits, and when it lands the tiles dissolve away in a staggered fade rather than blinking out.
 
 ## Practice offline
 
 Want to experiment without touching the live war? Turn **Use sync server** off and Clan Turf runs local-only: you see just your own claims and nothing is sent anywhere. While it's off, the **Clear my tiles** button at the bottom of the side panel turns on, so you can wipe the current world's local claims and start fresh as many times as you like.
 
-Heads up: the two controls live in different places. **Use sync server** is in the plugin settings (the wrench/settings tab), while **Clear my tiles** is at the bottom of the Clan Turf side panel. The button is always visible but stays greyed out and unclickable until the server is off, so it can never wipe shared turf.
+Heads up: the two controls live in different places. **Use sync server** is in the plugin settings (the wrench/settings tab), while **Clear my tiles** is at the bottom of the Clan Turf side panel. The button is always visible but stays grayed out and unclickable until the server is off, so it can never wipe shared turf.
 
 ## Tiles per hour
 
-Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracker, that shows three readouts: **Tiles Claimed** this session, your **Current TPH** (tiles per hour right now), and your **Max TPH** (the best rate you hit this session). It's a local, just-for-fun way to see how efficient your route is, and it works the same offline or live. Every claim counts, retaking a rival's tile included, so it's a running tally of your activity. Shift + right-click the box and pick **Reset** to start a fresh run anytime. It keeps counting across world hops and relogs, so a fight that spans worlds isn't wiped; only Reset (or turning the plugin off) clears it. Drag it anywhere you like.
+Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracker, that shows three readouts: **Tiles Claimed** this session, your **Current TPH** (tiles per hour right now), and your **Max TPH** (the best rate you hit this session). It's a local, just-for-fun way to see how efficient your route is, and it works the same offline or live. Every claim counts, retaking a rival's tile included, so it's a running tally of your activity. Shift + right-click the box for two resets: **Reset run** zeroes the session but keeps your Max TPH, and **Reset all** wipes everything including the max. It keeps counting across world hops and relogs, so a fight that spans worlds isn't wiped; only a reset (or turning the plugin off) clears it. Drag it anywhere you like.
 
 ## Also
 
 - **Custom clan color.** Recolor your own clan's tiles to whatever you like. It stays local, so everyone else still sees their own colors.
-- **Local-only mode.** Turn the sync server off to see just your own claims, no server involved.
 
 ## Usage
 
@@ -67,6 +66,7 @@ Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracke
 - **Announce takeovers** - Post a message in the clan tab when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud it is.
 - **Tile effects** - Toggle the takeover shimmer and the small walls that rise on nearby tiles.
+- **Wall on steal** - Pop a short wall on a single tile the moment you take it from a rival clan.
 - **Custom clan color** / **Your clan color** - Recolor your own clan's tiles, just for you.
 - **Clan chat commands** - Turn `!defend` / `!invade` typed in clan chat into rally calls.
 - **Use sync server** - Sync with other clans so the turf war is live (on by default). Turn it off for local-only, where nothing is sent anywhere.
@@ -76,6 +76,6 @@ Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracke
 ## Notes
 
 - **Turf is per clan and per world.** You need to be in a clan to claim anything, and each world's Grand Exchange is its own separate battleground.
-- **For the best look, pair it with [Improved Tile Indicators](https://runelite.net/plugin-hub/show/improved-tile-indicators).** With that plugin installed, Clan Turf's tiles can be set to render underneath your character, pets, and NPCs instead of on top of them. Add the Grand Exchange NPCs to its "render below" list: Brugsen Bursen, Grand Exchange Clerk, Banker, Murky Matt (runes), Farid Morrisane (ores and bars), Abigaila, Perdu, Emblem Trader, Hofuthand (weapons and armour), Relobo Blinyo (logs), Bob Barter (herbs). You'll have to add your own pets manually.
-- **What gets sent to the server.** With the sync server on, the plugin sends your clan name, the Grand Exchange region coordinates of the tiles you claim, and your current world number, so other clans' turf is visible to everyone. It sends no account details or personal information.
+- **For the best look, pair it with [Improved Tile Indicators](https://runelite.net/plugin-hub/show/improved-tile-indicators).** In that plugin, check both **Draw overlays below player** and **Draw overlays below NPCs** so Clan Turf's tiles render beneath your character and the GE crowd instead of painting over them. Add the Grand Exchange NPCs to its **NPCs to draw on top** list so the clerks stay visible: Brugsen Bursen, Grand Exchange Clerk, Banker, Murky Matt (runes), Farid Morrisane (ores and bars), Abigaila, Perdu, Emblem Trader, Hofuthand (weapons and armour), Relobo Blinyo (logs), Bob Barter (herbs). For pets, shift + right-click the pet and choose **Draw below**.
+- **What gets sent to the server.** With the sync server on, the plugin sends your clan name, the Grand Exchange region coordinates of the tiles you claim, and your current world number, so other clans' turf is visible to everyone. It sends no account details or personal information. The heavy syncing (your claims and the tile map) happens while you're at the Grand Exchange; a light active-battles check runs periodically in the background so the battles board stays current wherever you are.
 - **No automation.** The plugin reads your position and draws overlays. The clan chat commands only read clan messages to recognize the `!` commands and show local formatted text. It never moves your character, sends chat, or performs any automated game action.
