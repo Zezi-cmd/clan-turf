@@ -34,6 +34,7 @@ import java.awt.geom.Path2D;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import javax.inject.Inject;
@@ -73,6 +74,11 @@ class ClanTurfOverlay extends Overlay
 	private static final long STEAL_WALL_MS = 600;
 	/** Peak height of the steal-pop wall (independent of the boundary tile-wall settings). */
 	private static final int STEAL_WALL_HEIGHT = 60;
+	/** How long each tile's fade-out lasts on a reset/clear dissolve, in milliseconds. Kept short so
+	 * the random start delay below dominates and the tiles clearly pop out at different times. */
+	private static final long DISSOLVE_MS = 300;
+	/** Max random per-tile start delay for the dissolve, so tiles fade out in a staggered ripple. */
+	private static final long DISSOLVE_STAGGER_MS = 900;
 
 	/**
 	 * Pixels a shared (clan-vs-clan) border is pulled toward its own tile, so two touching clans
@@ -108,6 +114,11 @@ class ClanTurfOverlay extends Overlay
 
 	/** Per-tile fade-in: when each tile was first seen (or last changed clan). */
 	private final Map<Long, Appear> appearing = new HashMap<>();
+	/** Last non-empty tile-&gt;clan snapshot, so a reset/clear can dissolve what was on screen. */
+	private final Map<Long, String> lastOwners = new HashMap<>();
+	/** Tiles currently fading out (reset/clear dissolve): tile key -&gt; {clan, start time}. */
+	private final Map<Long, Dissolve> dissolving = new HashMap<>();
+	private long seenDissolveFlash;
 
 	private static final class Appear
 	{
@@ -120,6 +131,19 @@ class ClanTurfOverlay extends Overlay
 			this.clan = clan;
 			this.since = since;
 			this.steal = steal;
+		}
+	}
+
+	/** One fading-out tile during a reset/clear dissolve: its clan color and when its fade starts. */
+	private static final class Dissolve
+	{
+		final String clan;
+		final long start;
+
+		Dissolve(String clan, long start)
+		{
+			this.clan = clan;
+			this.start = start;
 		}
 	}
 
@@ -156,6 +180,20 @@ class ClanTurfOverlay extends Overlay
 		if (config.showBoundary() && GrandExchangeArea.near(playerLocation, BOUNDARY_MARGIN))
 		{
 			drawBoundary(graphics, wv);
+		}
+
+		// Reset/clear dissolve: fade the last on-screen tiles out (staggered) instead of a hard cut.
+		// Runs even when claims are already empty (post-wipe), so it sits before the early return.
+		long dnow = System.currentTimeMillis();
+		long flash = plugin.getDissolveFlashMs();
+		if (flash != seenDissolveFlash)
+		{
+			seenDissolveFlash = flash;
+			startDissolve(dnow);
+		}
+		if (!dissolving.isEmpty())
+		{
+			drawDissolving(graphics, wv, playerLocation, dnow);
 		}
 
 		if (claims.isEmpty())
@@ -203,6 +241,11 @@ class ClanTurfOverlay extends Overlay
 			}
 			WorldPoint w = WorldPoint.fromRegion(p.getRegionId(), p.getRegionX(), p.getRegionY(), p.getZ());
 			owner.put(key(w.getX(), w.getY()), p.getClanName());
+		}
+		if (!owner.isEmpty())
+		{
+			lastOwners.clear();
+			lastOwners.putAll(owner); // remember the latest tiles so a wipe can dissolve them
 		}
 		appearing.keySet().retainAll(owner.keySet()); // forget tiles that are gone
 
@@ -489,6 +532,72 @@ class ClanTurfOverlay extends Overlay
 			return 0.0;
 		}
 		return (MAX_DRAW_DISTANCE - dist) / (double) (MAX_DRAW_DISTANCE - FADE_FULL_DIST);
+	}
+
+	/**
+	 * Seeds the dissolve from the last on-screen tiles, each with a random start delay so they fade
+	 * out in a staggered ripple rather than all at once.
+	 */
+	private void startDissolve(long now)
+	{
+		dissolving.clear();
+		for (Map.Entry<Long, String> e : lastOwners.entrySet())
+		{
+			long stagger = (long) (Math.random() * DISSOLVE_STAGGER_MS);
+			dissolving.put(e.getKey(), new Dissolve(e.getValue(), now + stagger));
+		}
+	}
+
+	/** Paints the fading-out tiles of a reset/clear dissolve, dropping each when its fade finishes. */
+	private void drawDissolving(Graphics2D graphics, WorldView wv, WorldPoint playerLocation, long now)
+	{
+		int baseAlpha = config.fillOpacity();
+		int plane = wv.getPlane();
+		Iterator<Map.Entry<Long, Dissolve>> it = dissolving.entrySet().iterator();
+		while (it.hasNext())
+		{
+			Map.Entry<Long, Dissolve> e = it.next();
+			Dissolve d = e.getValue();
+			long el = now - d.start;
+			if (el >= DISSOLVE_MS)
+			{
+				it.remove();
+				continue;
+			}
+			double f = el <= 0 ? 1.0 : 1.0 - (el / (double) DISSOLVE_MS); // 1 -> 0 over DISSOLVE_MS
+			int sx = (int) (e.getKey() >> 20);
+			int sy = (int) (e.getKey() & 0xFFFFF);
+			Color base = ClanTurfColors.forClan(d.clan);
+			WorldPoint stored = new WorldPoint(sx, sy, plane);
+			for (WorldPoint wp : WorldPoint.toLocalInstance(wv, stored))
+			{
+				if (wp.getPlane() != plane)
+				{
+					continue;
+				}
+				double dist = playerLocation == null ? 0 : wp.distanceTo(playerLocation);
+				if (dist >= MAX_DRAW_DISTANCE)
+				{
+					continue;
+				}
+				LocalPoint lp = LocalPoint.fromWorld(wv, wp);
+				if (lp == null)
+				{
+					continue;
+				}
+				Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+				if (poly == null || poly.npoints < 4)
+				{
+					continue;
+				}
+				if (baseAlpha > 0)
+				{
+					int a = (int) Math.round(baseAlpha * fadeFactor(dist) * f);
+					graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), a));
+					graphics.fill(poly);
+				}
+			}
+		}
 	}
 
 	/**

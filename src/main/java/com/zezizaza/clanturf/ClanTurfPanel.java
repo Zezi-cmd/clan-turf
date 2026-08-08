@@ -150,10 +150,15 @@ class ClanTurfPanel extends PluginPanel
 		showEmpty("Waiting for the client…");
 	}
 
-	/** Enable the offline "Clear my tiles" button only while the sync server is off. */
+	/** Enable the "Clear my tiles" button only while the sync server is off. The "(offline)" hint is
+	 * shown only when the button is greyed out (server mode), to explain why it is unavailable. */
 	void setOfflineControls(boolean offline)
 	{
-		SwingUtilities.invokeLater(() -> clearOfflineBtn.setEnabled(offline));
+		SwingUtilities.invokeLater(() ->
+		{
+			clearOfflineBtn.setEnabled(offline);
+			clearOfflineBtn.setText(offline ? "Clear my tiles" : "Clear my tiles (offline)");
+		});
 	}
 
 	void showEmpty(String message)

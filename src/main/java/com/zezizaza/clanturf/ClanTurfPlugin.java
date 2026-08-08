@@ -128,6 +128,13 @@ public class ClanTurfPlugin extends Plugin
 	 * -1 = not yet baselined this cycle (login or first entry into the window). */
 	private long prevResetMs = -1L;
 
+	/** Previous countdown for the reset-moment detector (distinct from the ping baseline); paired
+	 * with dissolveFlashMs it lets the overlay start the tile dissolve when the daily wipe fires. */
+	private long resetDissolvePrevMs = -1L;
+	/** Bumped when tiles are about to be wiped (daily reset or the Clear button) so the overlay
+	 * plays the staggered fade-out instead of a hard cut. */
+	private long dissolveFlashMs = 0L;
+
 	/** Sticky runner-up for the current world's synthesized battle row: held until another non-owner
 	 * clan STRICTLY passes it, mirroring the server's stickyRank and the leader's sticky rule. */
 	private int synthRunnerUpWorld = -1;
@@ -264,6 +271,7 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
+		triggerTileDissolve(); // fade the tiles out instead of a hard cut
 		localStore.clearClaims(client.getWorld());
 		refreshClaims();
 	}
@@ -338,6 +346,18 @@ public class ClanTurfPlugin extends Plugin
 		boolean nearGe = here != null && GrandExchangeArea.near(here, ACTIVE_MARGIN);
 
 		updateResetPings(nearGe);
+
+		// Daily reset moment (countdown wraps from ~0 back up to a full day) -> dissolve the tiles.
+		// Server mode only; local mode doesn't wipe at reset (the Clear button handles that case).
+		if (store == serverStore)
+		{
+			long msReset = msUntilReset();
+			if (resetDissolvePrevMs >= 0 && resetDissolvePrevMs < 30_000L && msReset > 60_000L)
+			{
+				triggerTileDissolve();
+			}
+			resetDissolvePrevMs = msReset;
+		}
 
 		// Server mode: only sync while near the GE (connect-on-demand), then pull the latest cache
 		// every tick so rival claims appear live. Cache read is non-blocking; panel is throttled.
@@ -459,6 +479,18 @@ public class ClanTurfPlugin extends Plugin
 	Collection<ClanTurfPoint> getVisibleClaims()
 	{
 		return visibleClaims;
+	}
+
+	/** Start the tile dissolve (daily reset or the Clear button); the overlay watches this stamp. */
+	void triggerTileDissolve()
+	{
+		dissolveFlashMs = System.currentTimeMillis();
+	}
+
+	/** Epoch ms of the last dissolve trigger, so the overlay knows when to start fading tiles out. */
+	long getDissolveFlashMs()
+	{
+		return dissolveFlashMs;
 	}
 
 	/**
