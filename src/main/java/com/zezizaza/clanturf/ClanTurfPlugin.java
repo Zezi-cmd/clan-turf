@@ -104,6 +104,8 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Claims for the current world, refreshed on claim/world change. Read by the overlay. */
 	private volatile List<ClanTurfPoint> visibleClaims = Collections.emptyList();
+	/** Whether the player is near the GE right now, so overlays (the TPH tracker) can fade on it. */
+	private volatile boolean nearGeNow;
 
 	private WorldPoint lastTile;
 	private int lastWorld = -1;
@@ -353,6 +355,7 @@ public class ClanTurfPlugin extends Plugin
 		// Are we at/near the GE? Drives connect-on-demand and leader detection.
 		WorldPoint here = local.getWorldLocation();
 		boolean nearGe = here != null && GrandExchangeArea.near(here, ACTIVE_MARGIN);
+		nearGeNow = nearGe;
 
 		updateResetPings(nearGe);
 
@@ -489,6 +492,12 @@ public class ClanTurfPlugin extends Plugin
 	Collection<ClanTurfPoint> getVisibleClaims()
 	{
 		return visibleClaims;
+	}
+
+	/** Whether the player is near the GE right now (read by the TPH tracker overlay to fade in/out). */
+	boolean isNearGe()
+	{
+		return nearGeNow;
 	}
 
 	/** Start the tile dissolve (daily reset or the Clear button); the overlay watches this stamp. */

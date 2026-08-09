@@ -24,7 +24,9 @@
  */
 package com.zezizaza.clanturf;
 
+import java.awt.AlphaComposite;
 import java.awt.Color;
+import java.awt.Composite;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import javax.inject.Inject;
@@ -44,9 +46,11 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
 class ClanTurfTrackerOverlay extends OverlayPanel
 {
 	private static final Color AMBER = new Color(0xEB, 0xC7, 0x33);
+	private static final double FADE_EASE = 0.15; // per-frame ease for the GE-proximity fade
 
 	private final ClanTurfPlugin plugin;
 	private final ClanTurfConfig config;
+	private double alpha; // 0..1 fade level, eased toward 1 near the GE and 0 away
 
 	@Inject
 	ClanTurfTrackerOverlay(ClanTurfPlugin plugin, ClanTurfConfig config)
@@ -63,8 +67,13 @@ class ClanTurfTrackerOverlay extends OverlayPanel
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.showTileTracker())
+		// Fade in near the GE and out when away (like the side panel), so the tracker only shows
+		// where the turf war is. Off entirely when the toggle is disabled.
+		boolean show = config.showTileTracker() && plugin.isNearGe();
+		alpha += ((show ? 1.0 : 0.0) - alpha) * FADE_EASE;
+		if (alpha < 0.02)
 		{
+			alpha = 0.0;
 			return null;
 		}
 
@@ -85,6 +94,12 @@ class ClanTurfTrackerOverlay extends OverlayPanel
 				.left("Max TPH:")
 				.right(Integer.toString(plugin.getMaxTilesPerHour()))
 				.build());
-		return super.render(graphics);
+
+		Composite prev = graphics.getComposite();
+		graphics.setComposite(AlphaComposite.getInstance(
+				AlphaComposite.SRC_OVER, (float) Math.min(1.0, alpha)));
+		Dimension size = super.render(graphics);
+		graphics.setComposite(prev);
+		return size;
 	}
 }
