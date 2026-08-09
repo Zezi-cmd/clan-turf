@@ -161,6 +161,9 @@ public class ClanTurfPlugin extends Plugin
 	// lead for the confirm delay; that single event drives both the boundary animation and the
 	// chat announcement, so a see-sawing lead doesn't spam either.
 	private volatile String committedLeader;
+	/** Owner we've already announced a takeover for on the current world, so the global (away-from-GE)
+	 * detection off the battles feed doesn't double-fire what the near-GE detection already announced. */
+	private String announcedOwner;
 	private String pendingLeader;
 	private long pendingSince;
 	private boolean leaderInit;
@@ -206,6 +209,7 @@ public class ClanTurfPlugin extends Plugin
 		lastWorld = -1;
 		panelTicks = 0;
 		committedLeader = null;
+		announcedOwner = null;
 		pendingLeader = null;
 		leaderInit = false;
 		animStartMs = 0;
@@ -338,6 +342,7 @@ public class ClanTurfPlugin extends Plugin
 			lastWorld = world;
 			lastTile = null;
 			leaderInit = false; // re-baseline the committed leader silently on the new world
+			announcedOwner = null; // re-baseline the global takeover detector on the new world
 			animStartMs = 0;    // don't let a takeover animation bleed from the old world onto the new
 			refreshClaims();
 		}
@@ -386,6 +391,7 @@ public class ClanTurfPlugin extends Plugin
 		{
 			leaderInit = false;
 		}
+		checkGlobalTakeover(nearGe);
 
 		WorldPoint wp = local.getWorldLocation();
 		if (wp == null || wp.equals(lastTile))
@@ -953,17 +959,7 @@ public class ClanTurfPlugin extends Plugin
 
 		if (newLeader != null)
 		{
-			if (config.announceTakeovers())
-			{
-				// Same shape as the !command calls: [CT], "Grand Exchange", and the clan name in
-				// the clan's color, the rest white, so every plugin line reads consistently.
-				String on = "<col=" + hex(ClanTurfColors.forClan(newLeader)) + ">";
-				String name = newLeader.toUpperCase(java.util.Locale.ROOT);
-				String msg = on + "[CT]" + RESET + " " + WHITE + "The " + RESET
-						+ on + "Grand Exchange" + RESET + WHITE + " belongs to " + RESET
-						+ on + name + RESET + WHITE + "!" + RESET;
-				announceClan(msg);
-			}
+			announceTakeover(newLeader);
 			if (config.takeoverSound())
 			{
 				int delay = config.takeoverSoundDelayMs();
@@ -978,6 +974,54 @@ public class ClanTurfPlugin extends Plugin
 			}
 		}
 		log.debug("Takeover: {} -> {}", previous, newLeader);
+	}
+
+	/** Posts the "[CT] The Grand Exchange belongs to X" callout in the clan tab (if enabled). */
+	private void announceTakeover(String newLeader)
+	{
+		if (newLeader == null || !config.announceTakeovers())
+		{
+			return;
+		}
+		// [CT], "Grand Exchange" and the clan name in the clan's color, the rest white.
+		String on = "<col=" + hex(ClanTurfColors.forClan(newLeader)) + ">";
+		String name = newLeader.toUpperCase(java.util.Locale.ROOT);
+		String msg = on + "[CT]" + RESET + " " + WHITE + "The " + RESET
+				+ on + "Grand Exchange" + RESET + WHITE + " belongs to " + RESET
+				+ on + name + RESET + WHITE + "!" + RESET;
+		announceClan(msg);
+	}
+
+	/**
+	 * Global takeover detection off the always-on battles feed: fires the callout when your current
+	 * world's owner flips while you are AWAY from the GE (near the GE, {@link #updateLeader} handles
+	 * it in real time from claims). Message only for now; a proximity-scaled sound is layered on next.
+	 */
+	private void checkGlobalTakeover(boolean nearGe)
+	{
+		if (nearGe)
+		{
+			// Near the GE updateLeader is authoritative; keep our baseline synced so leaving the GE
+			// doesn't re-announce the owner we already committed to.
+			announcedOwner = committedLeader;
+			return;
+		}
+		ClanTurfBattle cur = findBattle(client.getWorld());
+		String owner = cur == null ? null : cur.getOwner();
+		if (owner == null)
+		{
+			return; // no battles data for this world yet
+		}
+		if (announcedOwner == null)
+		{
+			announcedOwner = owner; // baseline silently the first time we have data
+			return;
+		}
+		if (!owner.equalsIgnoreCase(announcedOwner))
+		{
+			announceTakeover(owner);
+			announcedOwner = owner;
+		}
 	}
 
 	/**
