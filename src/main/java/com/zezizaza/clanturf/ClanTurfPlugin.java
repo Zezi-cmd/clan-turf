@@ -156,6 +156,9 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Tiles beyond the GE within which the client still syncs (so turf shows as you approach). */
 	private static final int ACTIVE_MARGIN = 25;
+	/** Takeover sound: full inside the GE, then falls off (squared) with distance out, silent by
+	 * SOUND_MAX_DIST tiles. */
+	private static final int SOUND_MAX_DIST = 55;
 
 	// Debounced takeover state. The committed leader only changes after a challenger has held the
 	// lead for the confirm delay; that single event drives both the boundary animation and the
@@ -960,18 +963,7 @@ public class ClanTurfPlugin extends Plugin
 		if (newLeader != null)
 		{
 			announceTakeover(newLeader);
-			if (config.takeoverSound())
-			{
-				int delay = config.takeoverSoundDelayMs();
-				if (delay <= 0)
-				{
-					playTakeoverSound();
-				}
-				else
-				{
-					executor.schedule(this::playTakeoverSound, delay, TimeUnit.MILLISECONDS);
-				}
-			}
+			fireTakeoverSound();
 		}
 		log.debug("Takeover: {} -> {}", previous, newLeader);
 	}
@@ -1020,6 +1012,7 @@ public class ClanTurfPlugin extends Plugin
 		if (!owner.equalsIgnoreCase(announcedOwner))
 		{
 			announceTakeover(owner);
+			fireTakeoverSound();
 			announcedOwner = owner;
 		}
 	}
@@ -1055,13 +1048,54 @@ public class ClanTurfPlugin extends Plugin
 	}
 
 	/**
-	 * Plays the packaged takeover sound through RuneLite's {@link AudioPlayer} (the Plugin Hub
-	 * requires this over the raw Java Sound API). Volume percent is converted to a decibel gain.
+	 * Fires the takeover sound with its volume scaled by your distance to the GE at THIS moment
+	 * (a one-shot, set-at-trigger level - not a live fade): full inside the GE, falling off (squared)
+	 * to silent by {@link #SOUND_MAX_DIST} tiles outside. So a takeover across the map still pings
+	 * your chat but doesn't blast a sound out of nowhere.
 	 */
-	private void playTakeoverSound()
+	private void fireTakeoverSound()
 	{
-		float v = Math.max(0.0001f, Math.min(1f, config.takeoverVolume() / 100f));
+		if (!config.takeoverSound())
+		{
+			return;
+		}
+		Player local = client.getLocalPlayer();
+		WorldPoint here = local == null ? null : local.getWorldLocation();
+		int outside = GrandExchangeArea.distanceTo(here); // 0 when inside the GE box
+		double prox;
+		if (outside > 0)
+		{
+			// Outside the GE: loudest at the wall, falling off quickly (squared) to silent by the max.
+			double base = outside >= SOUND_MAX_DIST ? 0.0 : 1.0 - (double) outside / SOUND_MAX_DIST;
+			prox = base * base;
+		}
+		else
+		{
+			prox = 1.0; // inside the GE: full volume
+		}
+		if (prox <= 0.0)
+		{
+			return; // too far -> silent (the chat callout still fired)
+		}
+		float v = Math.max(0.0001f, Math.min(1f, (float) (config.takeoverVolume() / 100.0 * prox)));
 		float gainDb = (float) (20.0 * Math.log10(v));
+		int delay = config.takeoverSoundDelayMs();
+		if (delay <= 0)
+		{
+			playTakeoverSound(gainDb);
+		}
+		else
+		{
+			executor.schedule(() -> playTakeoverSound(gainDb), delay, TimeUnit.MILLISECONDS);
+		}
+	}
+
+	/**
+	 * Plays the packaged takeover sound through RuneLite's {@link AudioPlayer} (the Plugin Hub
+	 * requires this over the raw Java Sound API) at the given decibel gain.
+	 */
+	private void playTakeoverSound(float gainDb)
+	{
 		try
 		{
 			audioPlayer.play(getClass(), "VictoryClaim.wav", gainDb);

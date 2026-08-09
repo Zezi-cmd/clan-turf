@@ -179,6 +179,21 @@ final class GrandExchangeArea
 	}
 
 	/**
+	 * @return Chebyshev (tile) distance from the point to the area's bounding box on the ground
+	 *         floor: 0 if inside it, {@link Integer#MAX_VALUE} if on another plane or null.
+	 */
+	static int distanceTo(WorldPoint wp)
+	{
+		if (wp == null || wp.getPlane() != PLANE)
+		{
+			return Integer.MAX_VALUE;
+		}
+		int dx = Math.max(0, Math.max(MIN_X - wp.getX(), wp.getX() - MAX_X));
+		int dy = Math.max(0, Math.max(MIN_Y - wp.getY(), wp.getY() - MAX_Y));
+		return Math.max(dx, dy);
+	}
+
+	/**
 	 * @return true if the tile is inside (or on) the boundary on the ground floor.
 	 */
 	static boolean contains(WorldPoint wp)
