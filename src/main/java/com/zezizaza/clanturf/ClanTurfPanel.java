@@ -69,7 +69,7 @@ class ClanTurfPanel extends PluginPanel
 	private final Leaderboard board = new Leaderboard();
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
-	private final JButton clearOfflineBtn = new JButton("Clear my tiles (offline)");
+	private final JButton clearOfflineBtn = new JButton("Clear my tiles (offline only)");
 	private final IntConsumer onInvade;
 
 	/** Sticky scoreboard order (clan names) for the current world, so tied clans hold their slot
@@ -157,7 +157,7 @@ class ClanTurfPanel extends PluginPanel
 		SwingUtilities.invokeLater(() ->
 		{
 			clearOfflineBtn.setEnabled(offline);
-			clearOfflineBtn.setText(offline ? "Clear my tiles" : "Clear my tiles (offline)");
+			clearOfflineBtn.setText(offline ? "Clear my tiles" : "Clear my tiles (offline only)");
 		});
 	}
 
@@ -247,9 +247,10 @@ class ClanTurfPanel extends PluginPanel
 	/**
 	 * Rebuilds the Active battles list (server mode only; empty otherwise).
 	 *
-	 * @param myClan the player's own clan, so a world it owns shows "Defend" instead of "Invade"
+	 * @param myClan       the player's own clan, so a world it owns shows "Defend" instead of "Invade"
+	 * @param currentWorld the world you're on, so its row drops the button and shows larger
 	 */
-	void updateBattles(List<ClanTurfBattle> battles, String myClan)
+	void updateBattles(List<ClanTurfBattle> battles, String myClan, int currentWorld)
 	{
 		List<ClanTurfBattle> list = battles != null ? new ArrayList<>(battles) : new ArrayList<>();
 		SwingUtilities.invokeLater(() ->
@@ -267,7 +268,7 @@ class ClanTurfPanel extends PluginPanel
 			{
 				for (ClanTurfBattle b : list)
 				{
-					battlesBox.add(battleRow(b, myClan));
+					battlesBox.add(battleRow(b, myClan, currentWorld));
 				}
 			}
 			battlesBox.revalidate();
@@ -307,10 +308,11 @@ class ClanTurfPanel extends PluginPanel
 		return base;
 	}
 
-	private JPanel battleRow(ClanTurfBattle b, String myClan)
+	private JPanel battleRow(ClanTurfBattle b, String myClan, int currentWorld)
 	{
 		JPanel row = new JPanel(new BorderLayout(6, 0));
 		boolean mine = b.getOwner() != null && b.getOwner().equalsIgnoreCase(myClan);
+		boolean current = b.getWorld() == currentWorld; // the world you're on: no button, larger text
 		// Every row gets a left accent bar in the owning clan's color (a quick "who holds this world"
 		// cue), with a divider underneath.
 		javax.swing.border.Border divider =
@@ -321,17 +323,57 @@ class ClanTurfPanel extends PluginPanel
 				BorderFactory.createCompoundBorder(accent,
 						BorderFactory.createEmptyBorder(5, 5, 5, 0))));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getRunnerUp() != null ? 46 : 30));
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+				b.getRunnerUp() != null ? (current ? 58 : 46) : (current ? 34 : 30)));
 
 		String ownerHex = hex(ClanTurfColors.forClan(b.getOwner()));
+
+		if (current)
+		{
+			// Active world: world tag pinned left, the matchup centered in the space to its right so
+			// it sits between W# and the panel's right edge.
+			JLabel worldLabel = new JLabel("<html><b>W" + b.getWorld() + "</b></html>");
+			worldLabel.setFont(FontManager.getRunescapeFont());
+			worldLabel.setForeground(Color.WHITE);
+			row.add(worldLabel, BorderLayout.WEST);
+
+			String ownerName = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
+					+ "</span>";
+			String matchup;
+			if (b.getRunnerUp() != null)
+			{
+				// Owner column right-aligned and rival column left-aligned, so both clans hug the
+				// centered "vs" with equal spacing; each clan's tiles sit directly beneath its name.
+				String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
+				String upName = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
+						+ "</span>";
+				matchup = "<html><table cellpadding=0 cellspacing=0>"
+						+ "<tr><td align='right'>" + ownerName + "</td><td>&nbsp;vs&nbsp;</td>"
+						+ "<td align='left'>" + upName + "</td></tr>"
+						+ "<tr><td align='right'>" + b.getOwnerTiles() + tileWord(b.getOwnerTiles())
+						+ "</td><td></td><td align='left'>" + b.getRunnerUpTiles()
+						+ tileWord(b.getRunnerUpTiles()) + "</td></tr></table></html>";
+			}
+			else
+			{
+				matchup = "<html>" + ownerName + "&nbsp;" + b.getOwnerTiles()
+						+ tileWord(b.getOwnerTiles()) + "</html>";
+			}
+			JLabel matchupLabel = new JLabel(matchup);
+			matchupLabel.setFont(FontManager.getRunescapeFont());
+			matchupLabel.setForeground(Color.WHITE);
+			matchupLabel.setHorizontalAlignment(JLabel.CENTER);
+			row.add(matchupLabel, BorderLayout.CENTER);
+			return row;
+		}
+
+		// Other worlds: a single compact label plus the Invade/Defend button.
 		String worldTag = "<b>W" + b.getWorld() + "</b>";
 		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
 				+ "</span>&nbsp;" + b.getOwnerTiles() + tileWord(b.getOwnerTiles());
 		String html;
 		if (b.getRunnerUp() != null)
 		{
-			// Two clans contest this world: a table so both clan names line up, the world tag sits
-			// top-left, and "vs" sits on the right spanning both rows (vertically centered).
 			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
 			String upCell = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
 					+ "</span>&nbsp;" + b.getRunnerUpTiles() + tileWord(b.getRunnerUpTiles());
@@ -347,6 +389,7 @@ class ClanTurfPanel extends PluginPanel
 		JLabel info = new JLabel(html);
 		info.setFont(FontManager.getRunescapeSmallFont());
 		info.setForeground(Color.WHITE);
+		row.add(info, BorderLayout.CENTER);
 
 		JButton hop = new JButton(mine ? "Defend" : "Invade");
 		hop.setFont(FontManager.getRunescapeSmallFont());
@@ -358,8 +401,6 @@ class ClanTurfPanel extends PluginPanel
 				onInvade.accept(b.getWorld());
 			}
 		});
-
-		row.add(info, BorderLayout.CENTER);
 		row.add(hop, BorderLayout.EAST);
 		return row;
 	}
@@ -613,7 +654,7 @@ class ClanTurfPanel extends PluginPanel
 				}
 
 				// Rank + name (left), tiles + GE% (right), over a soft shadow for legibility.
-				String name = r.rank + ".  " + r.clan + (mine ? "  (you)" : "");
+				String name = r.rank + ".  " + r.clan;
 				double gePct = totalTiles > 0 ? shownTiles * 100.0 / totalTiles : 0.0;
 				String stat = shownTiles + "  (" + String.format("%.1f", gePct) + "%)";
 
