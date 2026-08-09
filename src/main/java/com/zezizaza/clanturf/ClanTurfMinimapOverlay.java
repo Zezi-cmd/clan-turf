@@ -32,8 +32,11 @@ import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.Shape;
 import java.awt.geom.Ellipse2D;
+import java.util.ArrayList;
+import java.util.List;
 import javax.inject.Inject;
 import net.runelite.api.Client;
+import net.runelite.api.Constants;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
 import net.runelite.api.Point;
@@ -116,24 +119,41 @@ class ClanTurfMinimapOverlay extends Overlay
 		}
 		Rectangle bounds = minimap.getBounds();
 
-		// Project every boundary point with a large distance cap so none are dropped, then build
-		// the full ring. Points that fall outside the minimap get clipped below, so the shape runs
-		// to the minimap edge instead of cutting across when the GE is only partly in view.
-		Polygon poly = new Polygon();
+		// Clip the GE outline to the loaded scene rectangle (in world coords) before projecting. The
+		// result is always a complete polygon of whatever part of the GE is loaded, so the fill can
+		// never tear into a strip when the GE is partly outside the streamed-in scene - it just fills
+		// in as more of the scene loads. The large projection cap plus the ellipse clip below still
+		// let the shape run to the minimap edge when zoomed in.
+		int baseX = client.getBaseX();
+		int baseY = client.getBaseY();
+		int plane = here.getPlane();
+		List<double[]> ring = new ArrayList<>();
 		for (WorldPoint bp : GrandExchangeArea.boundary())
 		{
-			for (WorldPoint wp : WorldPoint.toLocalInstance(wv, bp))
+			ring.add(new double[]{bp.getX(), bp.getY()});
+		}
+		ring = clip(ring, 0, baseX, true);                             // keep x >= scene left edge
+		ring = clip(ring, 0, baseX + Constants.SCENE_SIZE - 1, false); // keep x <= scene right edge
+		ring = clip(ring, 1, baseY, true);                             // keep y >= scene bottom edge
+		ring = clip(ring, 1, baseY + Constants.SCENE_SIZE - 1, false); // keep y <= scene top edge
+		if (ring.size() < 3)
+		{
+			return null; // the GE isn't in the loaded scene yet -> nothing to draw this frame
+		}
+
+		Polygon poly = new Polygon();
+		for (double[] p : ring)
+		{
+			LocalPoint lp = LocalPoint.fromWorld(wv, new WorldPoint(
+					(int) Math.round(p[0]), (int) Math.round(p[1]), plane));
+			if (lp == null)
 			{
-				LocalPoint lp = LocalPoint.fromWorld(wv, wp);
-				if (lp == null)
-				{
-					continue;
-				}
-				Point mp = Perspective.localToMinimap(client, lp, PROJECT_DISTANCE);
-				if (mp != null)
-				{
-					poly.addPoint(mp.getX(), mp.getY());
-				}
+				continue;
+			}
+			Point mp = Perspective.localToMinimap(client, lp, PROJECT_DISTANCE);
+			if (mp != null)
+			{
+				poly.addPoint(mp.getX(), mp.getY());
 			}
 		}
 
@@ -172,6 +192,49 @@ class ClanTurfMinimapOverlay extends Overlay
 		graphics.drawPolygon(poly);
 		graphics.setClip(oldClip);
 		return null;
+	}
+
+	/**
+	 * Sutherland-Hodgman: clips the polygon (a list of {@code {x, y}}) against one axis-aligned
+	 * half-plane. {@code axis} 0 = x, 1 = y; {@code keepGreater} true keeps points on the &gt;= side
+	 * of {@code bound}, false the &lt;= side. The crossing point is inserted wherever an edge leaves
+	 * the kept side, so the output stays a closed polygon.
+	 */
+	private static List<double[]> clip(List<double[]> poly, int axis, double bound, boolean keepGreater)
+	{
+		List<double[]> out = new ArrayList<>();
+		int n = poly.size();
+		for (int i = 0; i < n; i++)
+		{
+			double[] cur = poly.get(i);
+			double[] prev = poly.get((i + n - 1) % n);
+			boolean curIn = keepGreater ? cur[axis] >= bound : cur[axis] <= bound;
+			boolean prevIn = keepGreater ? prev[axis] >= bound : prev[axis] <= bound;
+			if (curIn)
+			{
+				if (!prevIn)
+				{
+					out.add(intersect(prev, cur, axis, bound));
+				}
+				out.add(cur);
+			}
+			else if (prevIn)
+			{
+				out.add(intersect(prev, cur, axis, bound));
+			}
+		}
+		return out;
+	}
+
+	/** The point where segment {@code prev -> cur} crosses the line {@code axis == bound}. */
+	private static double[] intersect(double[] prev, double[] cur, int axis, double bound)
+	{
+		int other = 1 - axis;
+		double t = (bound - prev[axis]) / (cur[axis] - prev[axis]);
+		double[] p = new double[2];
+		p[axis] = bound;
+		p[other] = prev[other] + t * (cur[other] - prev[other]);
+		return p;
 	}
 
 	/** The active minimap draw-area widget (fixed or either resizable layout), or null if hidden. */
