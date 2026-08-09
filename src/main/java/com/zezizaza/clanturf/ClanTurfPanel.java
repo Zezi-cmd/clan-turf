@@ -386,13 +386,13 @@ class ClanTurfPanel extends PluginPanel
 		// Other worlds: a single compact label plus the Invade/Defend button.
 		String worldTag = "<b>W" + b.getWorld() + "</b>";
 		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
-				+ "</span>&nbsp;" + b.getOwnerTiles() + tileWord(b.getOwnerTiles());
+				+ "</span>&nbsp;" + b.getOwnerTiles();
 		String html;
 		if (b.getRunnerUp() != null)
 		{
 			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
 			String upCell = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
-					+ "</span>&nbsp;" + b.getRunnerUpTiles() + tileWord(b.getRunnerUpTiles());
+					+ "</span>&nbsp;" + b.getRunnerUpTiles();
 			html = "<html><table cellpadding=0 cellspacing=0>"
 					+ "<tr><td>" + worldTag + "&nbsp;</td><td>" + ownerCell
 					+ "</td><td rowspan=2 valign='middle'>&nbsp;vs&nbsp;</td></tr>"
