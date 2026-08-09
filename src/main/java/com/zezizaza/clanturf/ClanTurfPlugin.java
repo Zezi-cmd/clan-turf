@@ -562,7 +562,25 @@ public class ClanTurfPlugin extends Plugin
 			list.removeIf(b -> b.getWorld() == world);
 			list.add(0, new ClanTurfBattle(world, owner, ownerTiles, total, runnerUp, runnerUpTiles));
 		}
+		// Hierarchy: your current world on top, then worlds your clan holds, then rivals. Stable sort,
+		// so each group keeps the server's tile-count order underneath.
+		String myClan = effectiveClanName();
+		list.sort((a, b) -> Integer.compare(battleRank(a, world, myClan), battleRank(b, world, myClan)));
 		return list;
+	}
+
+	/** Active-battles ordering: 0 = your current world, 1 = a world your clan owns, 2 = a rival's. */
+	private static int battleRank(ClanTurfBattle b, int currentWorld, String myClan)
+	{
+		if (b.getWorld() == currentWorld)
+		{
+			return 0;
+		}
+		if (myClan != null && myClan.equalsIgnoreCase(b.getOwner()))
+		{
+			return 1;
+		}
+		return 2;
 	}
 
 	/** The clan tiles are stamped for: our clan channel, or null if we're not in a clan. */

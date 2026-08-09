@@ -310,15 +310,21 @@ class ClanTurfPanel extends PluginPanel
 	private JPanel battleRow(ClanTurfBattle b, String myClan)
 	{
 		JPanel row = new JPanel(new BorderLayout(6, 0));
-		row.setBorder(BorderFactory.createCompoundBorder(
-				BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.MEDIUM_GRAY_COLOR),
-				BorderFactory.createEmptyBorder(5, 0, 5, 0)));
+		boolean mine = b.getOwner() != null && b.getOwner().equalsIgnoreCase(myClan);
+		// Every row gets a left accent bar in the owning clan's color (a quick "who holds this world"
+		// cue), with a divider underneath.
+		javax.swing.border.Border divider =
+				BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.MEDIUM_GRAY_COLOR);
+		javax.swing.border.Border accent =
+				BorderFactory.createMatteBorder(0, 3, 0, 0, ClanTurfColors.forClan(b.getOwner()));
+		row.setBorder(BorderFactory.createCompoundBorder(divider,
+				BorderFactory.createCompoundBorder(accent,
+						BorderFactory.createEmptyBorder(5, 5, 5, 0))));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getRunnerUp() != null ? 46 : 30));
 
 		String ownerHex = hex(ClanTurfColors.forClan(b.getOwner()));
-		String worldTag = "<b><span style='color:#" + ownerHex + "'>W" + b.getWorld()
-				+ "</span></b>";
+		String worldTag = "<b>W" + b.getWorld() + "</b>";
 		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
 				+ "</span>&nbsp;" + b.getOwnerTiles() + tileWord(b.getOwnerTiles());
 		String html;
@@ -342,7 +348,6 @@ class ClanTurfPanel extends PluginPanel
 		info.setFont(FontManager.getRunescapeSmallFont());
 		info.setForeground(Color.WHITE);
 
-		boolean mine = b.getOwner() != null && b.getOwner().equalsIgnoreCase(myClan);
 		JButton hop = new JButton(mine ? "Defend" : "Invade");
 		hop.setFont(FontManager.getRunescapeSmallFont());
 		hop.setFocusable(false);
