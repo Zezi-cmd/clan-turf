@@ -338,6 +338,7 @@ public class ClanTurfPlugin extends Plugin
 			lastWorld = world;
 			lastTile = null;
 			leaderInit = false; // re-baseline the committed leader silently on the new world
+			animStartMs = 0;    // don't let a takeover animation bleed from the old world onto the new
 			refreshClaims();
 		}
 

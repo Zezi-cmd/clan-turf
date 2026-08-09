@@ -119,6 +119,7 @@ class ClanTurfOverlay extends Overlay
 	/** Tiles currently fading out (reset/clear dissolve): tile key -&gt; {clan, start time}. */
 	private final Map<Long, Dissolve> dissolving = new HashMap<>();
 	private long seenDissolveFlash;
+	private int lastWorld = -1; // wipe per-tile memory on a world hop so nothing bleeds across worlds
 
 	private static final class Appear
 	{
@@ -170,6 +171,17 @@ class ClanTurfOverlay extends Overlay
 		if (wv == null)
 		{
 			return null;
+		}
+
+		int world = client.getWorld();
+		if (world != lastWorld)
+		{
+			// New world: the old world's tiles and animations don't belong here. Forget them so the
+			// new world's claims fade in fresh, instead of every changed tile popping a wall-on-steal.
+			lastWorld = world;
+			appearing.clear();
+			dissolving.clear();
+			lastOwners.clear();
 		}
 
 		Collection<ClanTurfPoint> claims = plugin.getVisibleClaims();
