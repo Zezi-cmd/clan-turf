@@ -181,7 +181,7 @@ class ClanTurfPanel extends PluginPanel
 	 * @param myClan          the player's own clan, or null/empty if they're not in one (shows a hint)
 	 */
 	void update(Collection<ClanTurfPoint> claims, int world, int totalTiles, String committedLeader,
-			String myClan)
+			String myClan, ClanTurfBattle currentBattle)
 	{
 		Map<String, Long> counts = claims.stream()
 				.collect(Collectors.groupingBy(ClanTurfPoint::getClanName, Collectors.counting()));
@@ -222,7 +222,23 @@ class ClanTurfPanel extends PluginPanel
 
 			if (ordered.isEmpty())
 			{
-				headline.setText("No tiles claimed yet - walk the GE.");
+				if (currentBattle != null && currentBattle.getOwner() != null)
+				{
+					// Away from the GE the local bars are gated off, but the always-on battles data
+					// still knows who holds your world - keep the headline live.
+					Color oc = ClanTurfColors.forClan(currentBattle.getOwner());
+					String ohex = String.format("%02x%02x%02x",
+							oc.getRed(), oc.getGreen(), oc.getBlue());
+					double pct = currentBattle.getTotalTiles() > 0
+							? currentBattle.getOwnerTiles() * 100.0 / currentBattle.getTotalTiles() : 0.0;
+					headline.setText("<html>GE owners: <b style='color:#" + ohex + "'>"
+							+ escape(currentBattle.getOwner()) + "</b> &nbsp;·&nbsp; "
+							+ String.format("%.1f", pct) + "% Stake</html>");
+				}
+				else
+				{
+					headline.setText("No tiles claimed yet - walk the GE.");
+				}
 			}
 			else
 			{
@@ -474,6 +490,7 @@ class ClanTurfPanel extends PluginPanel
 		private String myClan;           // the player's own clan, so its bar can be highlighted
 		private double leader = 1;       // displayed leader count (denominator for bar length)
 		private double targetLeader = 1;
+		private boolean opened;          // snap the very first fill (login/open); animate re-entries
 		private final Timer timer;
 
 		Leaderboard()
@@ -508,6 +525,7 @@ class ClanTurfPanel extends PluginPanel
 				if (r == null)
 				{
 					r = new Row(e.clan, e.color, 0.0, slot * PITCH); // new clan grows in place
+					r.alpha = 0.0; // start transparent so it fades in (mirrors the fade-out on leave)
 					rows.put(e.clan, r);
 				}
 				r.color = e.color;
@@ -528,19 +546,25 @@ class ClanTurfPanel extends PluginPanel
 				}
 			}
 
-			if (wasEmpty)
+			if (wasEmpty && !opened)
 			{
-				// First fill: snap so the panel doesn't animate up from zero on open.
+				// Very first fill (login/panel open): snap so it doesn't animate up from zero.
+				// Later refills (e.g. walking back into GE range) animate in instead of popping.
 				for (Row r : rows.values())
 				{
 					r.tiles = r.targetTiles;
 					r.y = r.targetY;
+					r.alpha = 1.0;
 				}
 				leader = targetLeader;
 			}
 			else if (!timer.isRunning())
 			{
 				timer.start();
+			}
+			if (!rows.isEmpty())
+			{
+				opened = true;
 			}
 
 			updatePreferredSize();
@@ -591,7 +615,7 @@ class ClanTurfPanel extends PluginPanel
 
 		private void updatePreferredSize()
 		{
-			int h = Math.max(1, rows.size()) * PITCH;
+			int h = rows.size() * PITCH; // 0 when empty, so it collapses fully out of GE range
 			setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH, h));
 			setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
 			revalidate();

@@ -370,7 +370,7 @@ public class ClanTurfPlugin extends Plugin
 			{
 				panelTicks = 0;
 				panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-						effectiveClanName());
+						effectiveClanName(), findBattle(world));
 				panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
 			}
 		}
@@ -867,7 +867,7 @@ public class ClanTurfPlugin extends Plugin
 		if (panel != null)
 		{
 			panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-					effectiveClanName());
+					effectiveClanName(), findBattle(world));
 			panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
 		}
 	}
