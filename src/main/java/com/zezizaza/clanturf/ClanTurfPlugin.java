@@ -48,9 +48,11 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.clan.ClanChannel;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.audio.AudioPlayer;
@@ -109,6 +111,14 @@ public class ClanTurfPlugin extends Plugin
 
 	private WorldPoint lastTile;
 	private int lastWorld = -1;
+
+	/** How long a snail-trail tile takes to fade out, in ms (shared with the overlay's fade math). */
+	private static final long TRAIL_MS = 2000L;
+	/** Snail-trail tiles: world tile -&gt; when the model last passed over it, for the fading overlay. */
+	private final Map<WorldPoint, Long> trail = new HashMap<>();
+	/** Last tile stamped into the trail, so each tile is stamped once on entry (not re-stamped every
+	 * frame while you stand on it, which would pin it at full instead of letting it fade out). */
+	private WorldPoint lastTrailTile;
 
 	/** The clan name we currently have a local color override registered for (custom clan color). */
 	private String ownColorClan;
@@ -369,6 +379,8 @@ public class ClanTurfPlugin extends Plugin
 			leaderInit = false; // re-baseline the committed leader silently on the new world
 			announcedOwner = null; // re-baseline the global takeover detector on the new world
 			animStartMs = 0;    // don't let a takeover animation bleed from the old world onto the new
+			trail.clear();      // snail-trail tiles are per-world coords; don't drag them across a hop
+			lastTrailTile = null;
 			refreshClaims();
 		}
 
@@ -419,7 +431,66 @@ public class ClanTurfPlugin extends Plugin
 		}
 		checkGlobalTakeover(nearGe);
 
-		WorldPoint wp = local.getWorldLocation();
+		// Claim the tile you're standing on: the true/server tile, once per tick. Running skips every
+		// other tile - correct, that's where you actually land. Snail-trail mode adds a purely visual
+		// trail over the skipped tiles per frame in onClientTick; it never changes what gets claimed.
+		tryClaim(local.getWorldLocation(), world);
+	}
+
+	@Subscribe
+	public void onClientTick(ClientTick tick)
+	{
+		// Snail trail: sample the tile under the moving character model each frame and remember it with
+		// a timestamp, so the overlay can paint a fading trail beneath your feet - including the tiles you
+		// skip while running. Visual only: it never claims or counts a tile (that stays true-tile on the
+		// game tick), so it can't become a faster way to grab turf.
+		pruneTrail();
+		if (!config.snailTrail() || !nearGeNow || effectiveClanName() == null)
+		{
+			return;
+		}
+		Player local = client.getLocalPlayer();
+		if (local == null)
+		{
+			return;
+		}
+		LocalPoint lp = local.getLocalLocation();
+		if (lp == null)
+		{
+			return;
+		}
+		// Stamp each tile once as the model enters it (the tile you land on included), then let it fade.
+		// Standing still doesn't re-stamp, so the tile you stop on fades out like the rest instead of
+		// being pinned at full while you're parked on it.
+		WorldPoint wp = WorldPoint.fromLocalInstance(client, lp);
+		if (wp != null && !wp.equals(lastTrailTile))
+		{
+			lastTrailTile = wp;
+			if (GrandExchangeArea.contains(wp))
+			{
+				trail.put(wp, System.currentTimeMillis());
+			}
+		}
+	}
+
+	/** Drop snail-trail tiles older than the fade window so the map stays small. */
+	private void pruneTrail()
+	{
+		if (trail.isEmpty())
+		{
+			return;
+		}
+		long cutoff = System.currentTimeMillis() - TRAIL_MS;
+		trail.values().removeIf(t -> t < cutoff);
+	}
+
+	/**
+	 * Stamp a claim for {@code wp} if it's a new tile inside the GE and we know our clan. Shared by
+	 * both claim modes - the game-tick true-tile path and the per-frame follow-model path - so the
+	 * dedupe ({@link #lastTile}), GE bounds check, tracker, and store write stay identical between them.
+	 */
+	private void tryClaim(WorldPoint wp, int world)
+	{
 		if (wp == null || wp.equals(lastTile))
 		{
 			return;
@@ -518,6 +589,24 @@ public class ClanTurfPlugin extends Plugin
 	boolean isNearGe()
 	{
 		return nearGeNow;
+	}
+
+	/** Snail-trail tiles (world tile -&gt; timestamp) the overlay paints as a fading trail. */
+	Map<WorldPoint, Long> getTrail()
+	{
+		return trail;
+	}
+
+	/** How long a snail-trail tile takes to fade out, in ms (the overlay's fade uses this). */
+	long getTrailFadeMs()
+	{
+		return TRAIL_MS;
+	}
+
+	/** The clan whose color the snail trail draws in (the local player's), or null if not in one. */
+	String getTrailClan()
+	{
+		return effectiveClanName();
 	}
 
 	/** Start the tile dissolve (daily reset or the Clear button); the overlay watches this stamp. */

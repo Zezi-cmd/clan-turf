@@ -208,6 +208,9 @@ class ClanTurfOverlay extends Overlay
 			drawDissolving(graphics, wv, playerLocation, dnow);
 		}
 
+		// Snail trail: the fading slime the model leaves as it moves, under the solid claims below.
+		drawTrail(graphics, wv, playerLocation, dnow);
+
 		if (claims.isEmpty())
 		{
 			return null;
@@ -240,7 +243,7 @@ class ClanTurfOverlay extends Overlay
 		// Near-player tile walls: a small banded wall on the conquering clan's tiles within a radius
 		// of the player, rising/falling with that tile's own shimmer pulse. Radius-bounded so it
 		// stays a local flourish instead of hundreds of walls across the whole GE.
-		boolean doTileWalls = inAnim && config.tileEffects() && config.tileWallHeight() > 0;
+		boolean doTileWalls = inAnim && config.tileWalls() && config.tileWallHeight() > 0;
 
 		// Who owns each tile, in canonical world coords, so we can test neighbours cheaply. Also
 		// stamp when each tile first appeared (or changed clan) so it can fade in.
@@ -356,7 +359,9 @@ class ClanTurfOverlay extends Overlay
 
 				// Wall-on-steal: a single short wall pops on a tile taken from a rival, rising then
 				// falling over STEAL_WALL_MS, synced to the fade - no shimmer, no radius gate.
-				if (config.wallOnSteal() && a.steal)
+				// With the snail trail on, it already pops a wall on every tile you step onto (steals
+				// included), so skip the dedicated steal pop here to avoid two walls on the stolen tile.
+				if (config.tileWalls() && a.steal && !config.snailTrail())
 				{
 					long stealEl = now - a.since;
 					if (stealEl >= 0 && stealEl < STEAL_WALL_MS)
@@ -607,6 +612,97 @@ class ClanTurfOverlay extends Overlay
 					int a = (int) Math.round(baseAlpha * fadeFactor(dist) * f);
 					graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), a));
 					graphics.fill(poly);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Paints the snail trail: tiles the character model recently passed over, each fading from full to
+	 * nothing over the plugin's fade window. Purely cosmetic - it draws under the solid claims, so the
+	 * every-other tiles you actually claim stay solid while the skipped in-between tiles fade away. The
+	 * plugin prunes expired tiles; this only reads and skips any that are already past the fade.
+	 */
+	private void drawTrail(Graphics2D graphics, WorldView wv, WorldPoint playerLocation, long now)
+	{
+		Map<WorldPoint, Long> trail = plugin.getTrail();
+		if (trail.isEmpty())
+		{
+			return;
+		}
+		String clan = plugin.getTrailClan();
+		if (clan == null)
+		{
+			return;
+		}
+		Color base = ClanTurfColors.forClan(clan);
+		long fadeMs = plugin.getTrailFadeMs();
+		int baseAlpha = config.fillOpacity();
+		int plane = wv.getPlane();
+		for (Map.Entry<WorldPoint, Long> e : trail.entrySet())
+		{
+			long age = now - e.getValue();
+			if (age < 0 || age >= fadeMs)
+			{
+				continue;
+			}
+			double f = 1.0 - age / (double) fadeMs; // 1 -> 0 over the fade window
+			WorldPoint stored = e.getKey();
+			if (stored.getPlane() != plane)
+			{
+				continue;
+			}
+			for (WorldPoint wp : WorldPoint.toLocalInstance(wv, stored))
+			{
+				if (wp.getPlane() != plane)
+				{
+					continue;
+				}
+				double dist = playerLocation == null ? 0 : wp.distanceTo(playerLocation);
+				if (dist >= MAX_DRAW_DISTANCE)
+				{
+					continue;
+				}
+				LocalPoint lp = LocalPoint.fromWorld(wv, wp);
+				if (lp == null)
+				{
+					continue;
+				}
+				Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+				if (poly == null || poly.npoints < 4)
+				{
+					continue;
+				}
+				double fade = fadeFactor(dist) * f;
+				if (baseAlpha > 0)
+				{
+					int a = (int) Math.round(baseAlpha * fade);
+					graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), a));
+					graphics.fill(poly);
+				}
+				// Outline each square on its own (all four edges) so a trail tile reads like its own
+				// little claim, the border fading out on the same curve as the fill.
+				if (config.drawOutline())
+				{
+					graphics.setColor(brighten(base, 60, (int) Math.round(config.outlineOpacity() * fade)));
+					graphics.setStroke(EDGE_STROKE);
+					graphics.draw(poly);
+				}
+
+				// Cascade wall: reuse the steal-pop shape, keyed to the tile's age (time since the model
+				// entered it), so a wall pops as you cross each tile and ripples out behind you, fading
+				// with the tile. Tied to Tile walls, so turning walls off leaves the trail as a plain fade.
+				if (config.tileWalls())
+				{
+					double st = age / (double) STEAL_WALL_MS;
+					if (st >= 0 && st < 1.0)
+					{
+						int wallH = (int) Math.round(Math.sin(Math.PI * st) * STEAL_WALL_HEIGHT);
+						if (wallH > 0)
+						{
+							drawTileWall(graphics, wv, lp, plane, wallH, base, fade);
+						}
+					}
 				}
 			}
 		}

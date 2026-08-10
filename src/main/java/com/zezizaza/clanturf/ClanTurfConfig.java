@@ -135,6 +135,20 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
+			keyName = "snailTrail",
+			section = appearanceSection,
+			name = "Snail trail",
+			description = "Leave a fading trail in your clan color under your character as it runs across "
+					+ "the GE, including the in-between tiles you skip while running. Purely visual - the "
+					+ "tiles you actually claim, and your tiles/hour, are exactly the same as with it off.",
+			position = 3
+	)
+	default boolean snailTrail()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 			keyName = "minimapTint",
 			section = appearanceSection,
 			name = "Tint GE on minimap",
@@ -202,8 +216,8 @@ public interface ClanTurfConfig extends Config
 			keyName = "tileEffects",
 			section = takeoverSection,
 			name = "Tile effects",
-			description = "Show the takeover tile effects: the shimmer on the conquering clan's tiles "
-					+ "and the small walls that rise on nearby tiles.",
+			description = "Show the takeover shimmer on the conquering clan's tiles. The raised wall "
+					+ "effects are separate, under Tile walls.",
 			position = 10
 	)
 	default boolean tileEffects()
@@ -212,14 +226,16 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
-			keyName = "wallOnSteal",
+			keyName = "tileWalls",
 			section = takeoverSection,
-			name = "Wall on steal",
-			description = "Pop a short wall on a single tile the moment it's taken from a rival clan, "
-					+ "in the new owner's color. A plain fade still covers empty tiles you claim.",
+			name = "Tile walls",
+			description = "Show the raised wall effects on tiles: the pop when a tile is taken from a "
+					+ "rival, the walls that rise near you on a takeover, and the cascading walls of the "
+					+ "snail trail. Off = flat tiles everywhere (a snail trail then just fades). The tile "
+					+ "shimmer is separate, under Tile effects.",
 			position = 11
 	)
-	default boolean wallOnSteal()
+	default boolean tileWalls()
 	{
 		return true;
 	}
