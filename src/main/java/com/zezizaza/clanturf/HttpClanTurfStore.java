@@ -62,6 +62,8 @@ class HttpClanTurfStore implements ClanTurfStore
 	private static final long POLL_MS = 2000;
 	private static final long FLUSH_MS = 1000;
 	private static final long BATTLES_POLL_MS = 15000; // the active-battles board updates slowly
+	private static final long CONNECT_GRACE_MS = 30000; // cold-start window before we call it down
+	private static final long STALE_MS = 45000; // no reply for this long = treat the server as down
 
 	private final ClanTurfConfig config;
 	private final HttpClient http = HttpClient.newBuilder()
@@ -73,6 +75,13 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile int activeWorld = -1;
 	private volatile List<ClanTurfPoint> cache = Collections.emptyList();
 	private volatile List<ClanTurfBattle> battles = Collections.emptyList();
+
+	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
+	private volatile long startedMs;
+	private volatile long lastOkMs;
+
+	/** False while the player is logged out: pauses every poll so we don't sync from the login screen. */
+	private volatile boolean online = true;
 
 	/** Claims made locally but not yet confirmed sent, keyed by tile. */
 	private final Map<String, ClanTurfPoint> pending = new ConcurrentHashMap<>();
@@ -90,6 +99,9 @@ class HttpClanTurfStore implements ClanTurfStore
 	public void start()
 	{
 		baseUrl = normalize(config.serverUrl());
+		startedMs = System.currentTimeMillis();
+		lastOkMs = 0;
+		online = true;
 		exec = Executors.newSingleThreadScheduledExecutor(r ->
 		{
 			Thread t = new Thread(r, "clanturf-sync");
@@ -127,6 +139,19 @@ class HttpClanTurfStore implements ClanTurfStore
 		return battles;
 	}
 
+	@Override
+	public ConnectionStatus connectionStatus()
+	{
+		long now = System.currentTimeMillis();
+		if (lastOkMs > 0)
+		{
+			// Heard back at least once: online while fresh, offline if the server has gone quiet.
+			return now - lastOkMs < STALE_MS ? ConnectionStatus.ONLINE : ConnectionStatus.OFFLINE;
+		}
+		// No reply yet: a fresh start is still connecting; past the grace window it's likely down.
+		return now - startedMs < CONNECT_GRACE_MS ? ConnectionStatus.CONNECTING : ConnectionStatus.OFFLINE;
+	}
+
 	/**
 	 * Connect-on-demand: the plugin sets the world to sync while the player is near the GE, or
 	 * {@code -1} to go idle (the poller then makes no requests, freeing the connection budget).
@@ -135,6 +160,30 @@ class HttpClanTurfStore implements ClanTurfStore
 	 * linger on the new world for a poll cycle), forget unsent claims from the old world, and kick
 	 * an immediate poll so the new world's tiles appear right away instead of after the next tick.
 	 */
+	/**
+	 * Pause or resume all sync with the player's login state. Logged out there's no world to sync and
+	 * nothing to show, so we stop every poll and drop the cache instead of quietly polling the server
+	 * from the login screen. On resume we kick an immediate battles poll so the board is fresh.
+	 */
+	void setOnline(boolean online)
+	{
+		this.online = online;
+		if (!online)
+		{
+			activeWorld = -1;
+			cache = Collections.emptyList();
+			pending.clear();
+		}
+		else
+		{
+			ScheduledExecutorService e = exec;
+			if (e != null)
+			{
+				e.execute(this::pollBattles);
+			}
+		}
+	}
+
 	void setActiveWorld(int world)
 	{
 		if (world == activeWorld)
@@ -196,7 +245,7 @@ class HttpClanTurfStore implements ClanTurfStore
 	private void poll()
 	{
 		int w = activeWorld;
-		if (w < 0)
+		if (!online || w < 0)
 		{
 			return;
 		}
@@ -245,6 +294,10 @@ class HttpClanTurfStore implements ClanTurfStore
 	/** Pulls the active-battles board (independent of the active world, so you can see it anywhere). */
 	private void pollBattles()
 	{
+		if (!online)
+		{
+			return;
+		}
 		String body = send("GET", "/battles", null);
 		if (body == null)
 		{
@@ -291,7 +344,7 @@ class HttpClanTurfStore implements ClanTurfStore
 
 	private void flush()
 	{
-		if (pending.isEmpty())
+		if (!online || pending.isEmpty())
 		{
 			return;
 		}
@@ -331,7 +384,12 @@ class HttpClanTurfStore implements ClanTurfStore
 						: HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
 			}
 			HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-			return resp.statusCode() / 100 == 2 ? resp.body() : null;
+			if (resp.statusCode() / 100 == 2)
+			{
+				lastOkMs = System.currentTimeMillis();
+				return resp.body();
+			}
+			return null;
 		}
 		catch (Exception e)
 		{

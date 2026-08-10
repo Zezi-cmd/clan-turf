@@ -181,7 +181,7 @@ class ClanTurfPanel extends PluginPanel
 	 * @param myClan          the player's own clan, or null/empty if they're not in one (shows a hint)
 	 */
 	void update(Collection<ClanTurfPoint> claims, int world, int totalTiles, String committedLeader,
-			String myClan, ClanTurfBattle currentBattle)
+			String myClan, ClanTurfBattle currentBattle, ClanTurfStore.ConnectionStatus status)
 	{
 		Map<String, Long> counts = claims.stream()
 				.collect(Collectors.groupingBy(ClanTurfPoint::getClanName, Collectors.counting()));
@@ -234,6 +234,15 @@ class ClanTurfPanel extends PluginPanel
 					headline.setText("<html>GE owners: <b style='color:#" + ohex + "'>"
 							+ escape(currentBattle.getOwner()) + "</b> &nbsp;·&nbsp; "
 							+ String.format("%.1f", pct) + "% Stake</html>");
+				}
+				else if (status == ClanTurfStore.ConnectionStatus.CONNECTING)
+				{
+					// Cold start: the server hasn't answered yet, so don't imply the GE is empty.
+					headline.setText("Connecting to the sync server…");
+				}
+				else if (status == ClanTurfStore.ConnectionStatus.OFFLINE)
+				{
+					headline.setText("Sync server unreachable - retrying.");
 				}
 				else
 				{

@@ -326,6 +326,26 @@ public class ClanTurfPlugin extends Plugin
 	{
 		// Logging in or hopping resets where we think the player is.
 		lastTile = null;
+
+		GameState state = event.getGameState();
+		if (state == GameState.LOGGED_IN)
+		{
+			if (store == serverStore)
+			{
+				serverStore.setOnline(true); // resume syncing now that we're back in-game
+			}
+		}
+		else if (state == GameState.LOGIN_SCREEN)
+		{
+			// Logged out to the login/world-select screen: stop all sync and blank the panel so the
+			// scoreboard bars and battles don't linger over the login screen. Login re-drives it all.
+			if (store == serverStore)
+			{
+				serverStore.setOnline(false);
+			}
+			lastWorld = -1;
+			refreshClaims();
+		}
 	}
 
 	@Subscribe
@@ -382,7 +402,7 @@ public class ClanTurfPlugin extends Plugin
 			{
 				panelTicks = 0;
 				panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-						effectiveClanName(), findBattle(world));
+						effectiveClanName(), findBattle(world), store.connectionStatus());
 				panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
 			}
 		}
@@ -883,12 +903,22 @@ public class ClanTurfPlugin extends Plugin
 	{
 		int world = client.getWorld();
 		visibleClaims = new java.util.ArrayList<>(store.getClaims(world));
-		if (panel != null)
+		if (panel == null)
 		{
-			panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-					effectiveClanName(), findBattle(world));
-			panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
+			return;
 		}
+		// Before login there's no world and no reason to mention the server: startUp() calls this at
+		// the login screen, where "Connecting to the sync server..." is nonsense. Show a plain waiting
+		// message until we're actually in-game; the connection wording only kicks in once logged in.
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			panel.showEmpty("Waiting for the client…");
+			panel.updateBattles(Collections.emptyList(), effectiveClanName(), -1);
+			return;
+		}
+		panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
+				effectiveClanName(), findBattle(world), store.connectionStatus());
+		panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
 	}
 
 	/** Committed (debounced) leading clan, for the boundary's resting color. Null = none. */

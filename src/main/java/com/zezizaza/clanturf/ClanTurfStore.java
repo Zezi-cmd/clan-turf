@@ -87,4 +87,25 @@ interface ClanTurfStore
 	default void stop()
 	{
 	}
+
+	/**
+	 * Rough connection health, used only to word the panel's empty state so a cold start or a
+	 * down server reads as such instead of the misleading "no tiles claimed yet." The local
+	 * store never talks to a server, so it is always {@link ConnectionStatus#ONLINE}.
+	 */
+	default ConnectionStatus connectionStatus()
+	{
+		return ConnectionStatus.ONLINE;
+	}
+
+	/** Connection health for the sidebar's empty state. */
+	enum ConnectionStatus
+	{
+		/** Started but no reply from the server yet (cold start, first poll in flight). */
+		CONNECTING,
+		/** Heard back from the server recently. */
+		ONLINE,
+		/** Been trying a while with no reply, or lost contact - server likely down. */
+		OFFLINE
+	}
 }
