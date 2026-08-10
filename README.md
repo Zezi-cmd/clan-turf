@@ -64,8 +64,7 @@ Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracke
 - **Tint GE on minimap** / **Minimap opacity** - Shade the GE on the minimap in the current owner's color, and set how strong that shading is.
 - **Announce takeovers** - Post a message in the clan tab when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud it is.
-- **Tile effects** - Toggle the takeover shimmer on the conquering clan's tiles.
-- **Tile walls** - Toggle every raised tile-wall effect together: the pop when you take a tile from a rival, the walls that rise near you on a takeover, and the snail trail's cascading walls. Off leaves flat tiles (and a snail trail that only fades).
+- **Tile walls** - Toggle every raised tile effect together: the pop when you take a tile from a rival, the walls and shimmer that rise near you on a takeover, and the snail trail's cascading walls. Off leaves flat tiles (and a snail trail that only fades).
 - **Custom clan color** / **Your clan color** - Recolor your own clan's tiles, just for you.
 - **Clan chat commands** - Turn `!defend` / `!invade` typed in clan chat into rally calls.
 - **Use sync server** - Sync with other clans so the turf war is live (on by default). Turn it off for local-only, where nothing is sent anywhere.

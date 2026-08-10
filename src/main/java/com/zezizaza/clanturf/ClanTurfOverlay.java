@@ -239,7 +239,7 @@ class ClanTurfOverlay extends Overlay
 			winEnv = animEl > animTotal - fadeOut
 					? Math.max(0.0, (animTotal - animEl) / (double) fadeOut) : 1.0;
 		}
-		boolean doSparkle = inAnim && config.tileEffects() && config.sparkleIntensity() > 0;
+		boolean doSparkle = inAnim && config.tileWalls() && config.sparkleIntensity() > 0;
 		// Near-player tile walls: a small banded wall on the conquering clan's tiles within a radius
 		// of the player, rising/falling with that tile's own shimmer pulse. Radius-bounded so it
 		// stays a local flourish instead of hundreds of walls across the whole GE.
@@ -389,10 +389,10 @@ class ClanTurfOverlay extends Overlay
 					double ccy = (yp[0] + yp[1] + yp[2] + yp[3]) / 4.0;
 
 					drawTileOutline(graphics, edge,
-							edgeType(owner.get(key(sx, sy - 1)), clan),   // south
-							edgeType(owner.get(key(sx + 1, sy)), clan),   // east
-							edgeType(owner.get(key(sx, sy + 1)), clan),   // north
-							edgeType(owner.get(key(sx - 1, sy)), clan),   // west
+							edgeType(owner.get(key(sx, sy - 1)), clan, GrandExchangeArea.contains(sx, sy - 1)),
+							edgeType(owner.get(key(sx + 1, sy)), clan, GrandExchangeArea.contains(sx + 1, sy)),
+							edgeType(owner.get(key(sx, sy + 1)), clan, GrandExchangeArea.contains(sx, sy + 1)),
+							edgeType(owner.get(key(sx - 1, sy)), clan, GrandExchangeArea.contains(sx - 1, sy)),
 							xp, yp, ccx, ccy);
 				}
 			}
@@ -401,12 +401,17 @@ class ClanTurfOverlay extends Overlay
 		return null;
 	}
 
-	/** Empty neighbour -> border on the tile edge; same clan -> skip; rival -> inset border. */
-	private static int edgeType(String neighbour, String clan)
+	/**
+	 * Empty neighbour -> border on the tile edge; same clan -> skip; rival -> inset border. An empty
+	 * neighbour that is <em>outside</em> the GE is skipped too: that edge lies on the GE perimeter, where
+	 * the boundary line already draws it, so drawing the tile border there just doubles the line (and
+	 * splits into two on uneven ground).
+	 */
+	private static int edgeType(String neighbour, String clan, boolean neighbourInGe)
 	{
 		if (neighbour == null)
 		{
-			return EDGE_FULL;
+			return neighbourInGe ? EDGE_FULL : EDGE_SKIP;
 		}
 		return neighbour.equals(clan) ? EDGE_SKIP : EDGE_RIVAL;
 	}
@@ -837,6 +842,21 @@ class ClanTurfOverlay extends Overlay
 			return;
 		}
 
+		// LocalPoint.fromWorld gives each boundary tile's center, which sits half a tile inside the
+		// claimable footprint (a tile is claimable by its south-west corner but spans a full tile past
+		// it), so the drawn line looked inset. Push each point half a tile out along the polygon's
+		// outward normal so the border lines up with what you can actually claim. Winding decides which
+		// way is "out": for a CCW loop an edge (dx,dy) faces normal (dy,-dx); CW flips it.
+		final double halfTile = Perspective.LOCAL_TILE_SIZE / 2.0;
+		double area2 = 0;
+		for (int i = 0; i < n; i++)
+		{
+			WorldPoint a = corners[i];
+			WorldPoint b = corners[(i + 1) % n];
+			area2 += (double) a.getX() * b.getY() - (double) b.getX() * a.getY();
+		}
+		final double wind = area2 >= 0 ? 1.0 : -1.0;
+
 		Point[] ground = new Point[n];
 		Point[] top = new Point[n];
 		for (int i = 0; i < n; i++)
@@ -846,9 +866,22 @@ class ClanTurfOverlay extends Overlay
 			{
 				continue;
 			}
+			WorldPoint prev = corners[(i - 1 + n) % n];
+			WorldPoint next = corners[(i + 1) % n];
+			double nx = wind * ((corners[i].getY() - prev.getY()) + (next.getY() - corners[i].getY()));
+			double ny = wind * (-(corners[i].getX() - prev.getX()) - (next.getX() - corners[i].getX()));
+			double len = Math.hypot(nx, ny);
+			if (len > 1e-6)
+			{
+				nx /= len;
+				ny /= len;
+			}
+			LocalPoint out = new LocalPoint(
+					(int) Math.round(lp.getX() + nx * halfTile),
+					(int) Math.round(lp.getY() + ny * halfTile), wv);
 			int plane = corners[i].getPlane();
-			ground[i] = Perspective.localToCanvas(client, lp, plane);
-			top[i] = height <= 0 ? ground[i] : Perspective.localToCanvas(client, lp, plane, height);
+			ground[i] = Perspective.localToCanvas(client, out, plane);
+			top[i] = height <= 0 ? ground[i] : Perspective.localToCanvas(client, out, plane, height);
 		}
 
 		// Wall fill: each segment split into horizontal bands, tiling edge-to-edge (no overlap, so
@@ -910,6 +943,11 @@ class ClanTurfOverlay extends Overlay
 			t[k] = Perspective.localToCanvas(client, c, plane, height);
 		}
 
+		// Lift the wall to a vivid version of the clan's own hue. A dark clan color (say a deep green)
+		// drawn translucent over the tiles below barely reads; flooring the brightness keeps the hue but
+		// makes the wall glow. Already-bright clans are left essentially untouched.
+		Color wall = energize(color);
+
 		int strips = Math.max(1, config.bandStrips());
 		int refAlpha = config.barrierOpacity();
 		for (int k = 0; k < 4; k++)
@@ -929,11 +967,19 @@ class ClanTurfOverlay extends Overlay
 				quad.addPoint(bandX(g[m], t[m], f1), bandY(g[m], t[m], f1));
 				quad.addPoint(bandX(g[k], t[k], f1), bandY(g[k], t[k], f1));
 				int a = (int) Math.round(refAlpha * bandFactor(s, strips) * fade);
-				graphics.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(),
+				graphics.setColor(new Color(wall.getRed(), wall.getGreen(), wall.getBlue(),
 						Math.max(0, Math.min(255, a))));
 				graphics.fill(quad);
 			}
 		}
+	}
+
+	/** Mix a clan color toward white for the tile-wall effect, giving a lighter, slightly desaturated
+	 * tint of the clan color. A same-hue "vivid" version blends into the same-color ground fill; adding
+	 * white gives the wall contrast so it still reads inside fully tinted turf. 0 = clan color, 1 = white. */
+	private static Color energize(Color c)
+	{
+		return lerp(c, Color.WHITE, 0.45);
 	}
 
 	/**

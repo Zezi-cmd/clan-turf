@@ -201,6 +201,15 @@ final class GrandExchangeArea
 		return wp != null && wp.getPlane() == PLANE && inPolygon(wp.getX(), wp.getY());
 	}
 
+	/**
+	 * @return true if the tile at (x, y) is inside (or on) the boundary. Same test as
+	 *         {@link #contains(WorldPoint)} by raw tile coords, for callers already on the ground floor.
+	 */
+	static boolean contains(int x, int y)
+	{
+		return inPolygon(x, y);
+	}
+
 	/** Tiles inside the area, used as the denominator for a clan's percentage. */
 	static int totalTiles()
 	{

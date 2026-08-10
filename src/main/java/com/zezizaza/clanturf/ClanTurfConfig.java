@@ -213,27 +213,13 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
-			keyName = "tileEffects",
-			section = takeoverSection,
-			name = "Tile effects",
-			description = "Show the takeover shimmer on the conquering clan's tiles. The raised wall "
-					+ "effects are separate, under Tile walls.",
-			position = 10
-	)
-	default boolean tileEffects()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 			keyName = "tileWalls",
 			section = takeoverSection,
 			name = "Tile walls",
-			description = "Show the raised wall effects on tiles: the pop when a tile is taken from a "
-					+ "rival, the walls that rise near you on a takeover, and the cascading walls of the "
-					+ "snail trail. Off = flat tiles everywhere (a snail trail then just fades). The tile "
-					+ "shimmer is separate, under Tile effects.",
-			position = 11
+			description = "Show the raised tile effects: the wall pop when a tile is taken from a rival, "
+					+ "the walls and shimmer that rise near you on a takeover, and the cascading walls of "
+					+ "the snail trail. Off = flat tiles everywhere (a snail trail then just fades).",
+			position = 10
 	)
 	default boolean tileWalls()
 	{
