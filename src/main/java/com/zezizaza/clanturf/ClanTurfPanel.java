@@ -181,7 +181,8 @@ class ClanTurfPanel extends PluginPanel
 	 * @param myClan          the player's own clan, or null/empty if they're not in one (shows a hint)
 	 */
 	void update(Collection<ClanTurfPoint> claims, int world, int totalTiles, String committedLeader,
-			String myClan, ClanTurfBattle currentBattle, ClanTurfStore.ConnectionStatus status)
+			String myClan, ClanTurfBattle currentBattle, ClanTurfStore.ConnectionStatus status,
+			boolean clanHintDue)
 	{
 		Map<String, Long> counts = claims.stream()
 				.collect(Collectors.groupingBy(ClanTurfPoint::getClanName, Collectors.counting()));
@@ -213,7 +214,10 @@ class ClanTurfPanel extends PluginPanel
 
 		long claimed = ordered.stream().mapToLong(e -> e.tiles).sum();
 
-		boolean clanless = myClan == null || myClan.trim().isEmpty();
+		// Only show the "join a clan" hint once we're confident: clan-less AND the channel has had time
+		// to load. Otherwise it flashes at clan members during the login/connect wait before their clan
+		// channel arrives.
+		boolean clanless = (myClan == null || myClan.trim().isEmpty()) && clanHintDue;
 
 		SwingUtilities.invokeLater(() ->
 		{

@@ -120,6 +120,12 @@ public class ClanTurfPlugin extends Plugin
 	 * frame while you stand on it, which would pin it at full instead of letting it fade out). */
 	private WorldPoint lastTrailTile;
 
+	/** When we most recently had no clan channel, so the panel only shows the "join a clan" hint once
+	 * the channel has had time to load (it arrives seconds after login and drops on a hop). Otherwise
+	 * the hint flashes at clan members during the login/connect wait. 0 = we currently have a clan. */
+	private long clanlessSinceMs;
+	private static final long CLAN_GRACE_MS = 6000L;
+
 	/** The clan name we currently have a local color override registered for (custom clan color). */
 	private String ownColorClan;
 
@@ -354,6 +360,7 @@ public class ClanTurfPlugin extends Plugin
 				serverStore.setOnline(false);
 			}
 			lastWorld = -1;
+			clanlessSinceMs = 0; // re-grace the clan hint on the next login instead of firing instantly
 			refreshClaims();
 		}
 	}
@@ -370,6 +377,17 @@ public class ClanTurfPlugin extends Plugin
 		}
 
 		updateOwnClanColor();
+
+		// Track how long we've had no clan channel, so the panel doesn't call a clan member "clan-less"
+		// during the seconds it takes the channel to load after login (or reload after a hop).
+		if (effectiveClanName() != null)
+		{
+			clanlessSinceMs = 0;
+		}
+		else if (clanlessSinceMs == 0)
+		{
+			clanlessSinceMs = System.currentTimeMillis();
+		}
 
 		int world = client.getWorld();
 		if (world != lastWorld)
@@ -414,7 +432,7 @@ public class ClanTurfPlugin extends Plugin
 			{
 				panelTicks = 0;
 				panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-						effectiveClanName(), findBattle(world), store.connectionStatus());
+						effectiveClanName(), findBattle(world), store.connectionStatus(), clanHintDue());
 				panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
 			}
 		}
@@ -722,6 +740,13 @@ public class ClanTurfPlugin extends Plugin
 		return channel.getName();
 	}
 
+	/** True once we're confident the player really is clan-less: the clan channel has had time to load
+	 * after login/hop, so an empty clan is genuine rather than not-yet-loaded. Gates the panel hint. */
+	private boolean clanHintDue()
+	{
+		return clanlessSinceMs != 0 && System.currentTimeMillis() - clanlessSinceMs > CLAN_GRACE_MS;
+	}
+
 	/**
 	 * Registers (or clears) a local color override for the player's own clan, from the "Custom
 	 * clan color" setting. Everything paints through {@link ClanTurfColors#forClan}, so this one
@@ -1006,7 +1031,7 @@ public class ClanTurfPlugin extends Plugin
 			return;
 		}
 		panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-				effectiveClanName(), findBattle(world), store.connectionStatus());
+				effectiveClanName(), findBattle(world), store.connectionStatus(), clanHintDue());
 		panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
 	}
 
