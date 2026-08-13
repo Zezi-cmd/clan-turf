@@ -10,7 +10,7 @@ Step on any Grand Exchange tile to claim it for your clan. Walk onto a rival's t
 
 ![Territory](images/territory.png)
 
-As you run, an optional snail trail marks your path in your clan's color - a slick ripple of little walls that cascades out behind you before fading away.
+As you run, an optional trail effect marks your path in your clan's color - a slick ripple of little walls that cascades out behind you before fading away.
 
 ![Snail trail](images/snailtrail.png)
 
