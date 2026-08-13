@@ -54,10 +54,6 @@ Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracke
 
 ![Tiles per hour](images/tph.png)
 
-## Customization
-
-- **Custom clan color.** Recolor your own clan's tiles to whatever you like. It stays local, so everyone else still sees their own colors.
-
 ## Usage
 
 1. Enable the plugin.
@@ -77,7 +73,10 @@ Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracke
 - **Announce takeovers** - Post a message in the clan tab when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud it is.
 - **Tile walls** - Toggle every raised tile effect together: the pop when you take a tile from a rival, the walls and shimmer that rise near you on a takeover, and the snail trail's cascading walls. Off leaves flat tiles (and a snail trail that only fades).
-- **Custom clan color** / **Your clan color** - Recolor your own clan's tiles, just for you.
+
+![Configuration](images/config.png)
+
+- **Custom clan color** / **Your clan color** - Recolor your own clan's tiles to whatever you like. It stays local, so everyone else still sees their own colors.
 - **Clan chat commands** - Turn `!defend` / `!invade` typed in clan chat into rally calls.
 - **Use sync server** - Sync with other clans so the turf war is live (on by default). Turn it off for local-only, where nothing is sent anywhere.
 - **Reset countdown** - Show the on-screen countdown and clan warnings before the daily reset.
