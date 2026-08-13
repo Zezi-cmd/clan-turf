@@ -10,9 +10,15 @@ Step on any Grand Exchange tile to claim it for your clan. Walk onto a rival's t
 
 ![Territory](images/territory.png)
 
+As you run, an optional snail trail marks your path in your clan's color - a slick ripple of little walls that cascades out behind you before fading away.
+
+![Snail trail](images/snailtrail.png)
+
 ## The takeover
 
 When a clan seizes the lead for the GE, the boundary rises into a colored wall that swaps to the new owner's color and settles back down, the winning clan's nearby tiles shimmer, and a call goes out in your clan tab with a sound cue. Take a single tile off a rival and a short wall pops up on just that tile in your clan's color. Want it subtler? A flat-line mode fades the border color without raising the wall.
+
+![Takeover](images/takeover.png)
 
 ## Live scoreboard
 
@@ -22,6 +28,8 @@ The side panel ranks every clan on your world by tiles held, with each clan's sh
 
 See which worlds are contested, with the leading clan set against its closest rival on each world, so you can read the fight at a glance. Click **Invade** to hop straight to a rival's world, or **Defend** to jump to one your clan already holds.
 
+![Scoreboard and active battles](images/scorboard_activebattles.png)
+
 ## Rally your clan in chat
 
 Type `!defend 307` or `!invade 420` in clan chat (the short `!def` and `!inv` work too) and it turns into a formatted rally call in the right clan's color, checked against the live board so only real targets go through. Every Clan Turf message lands in your clan tab, so you coordinate and get plugin alerts in one place.
@@ -29,6 +37,8 @@ Type `!defend 307` or `!invade 420` in clan chat (the short `!def` and `!inv` wo
 ## The war on your minimap
 
 The Grand Exchange is shaded on your minimap in the current owner's color, so you can read who holds it at a glance.
+
+![Minimap](images/minimap.png)
 
 ## Daily reset
 
@@ -41,6 +51,8 @@ Want to experiment without touching the live war? Turn **Use sync server** off (
 ## Tiles per hour
 
 Turn on the **Tiles/hour tracker** for a little on-screen box, like an XP tracker, that shows three readouts: **Tiles Claimed** this session, your **Current TPH** (tiles per hour right now), and your **Max TPH** (the best rate you hit this session). It's a local, just-for-fun way to see how efficient your route is, and it works the same offline or live. Every claim counts, retaking a rival's tile included, so it's a running tally of your activity. Shift + right-click the box for two resets: **Reset run** zeroes the session but keeps your Max TPH, and **Reset all** wipes everything including the max. It keeps counting across world hops and relogs, so a fight that spans worlds isn't wiped; only a reset (or turning the plugin off) clears it. Drag it anywhere you like.
+
+![Tiles per hour](images/tph.png)
 
 ## Customization
 
