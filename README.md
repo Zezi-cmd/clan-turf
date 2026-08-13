@@ -24,11 +24,11 @@ When a clan seizes the lead for the GE, the boundary rises into a colored wall t
 
 The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds.
 
+![Scoreboard and active battles](images/scorboard_activebattles.png)
+
 ## Active battles
 
 See which worlds are contested, with the leading clan set against its closest rival on each world, so you can read the fight at a glance. Click **Invade** to hop straight to a rival's world, or **Defend** to jump to one your clan already holds.
-
-![Scoreboard and active battles](images/scorboard_activebattles.png)
 
 ## Rally your clan in chat
 
