@@ -24,15 +24,19 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds.
 
-![Scoreboard and active battles](images/scorboard_activebattles.png)
+![Scoreboard](images/scoreboard.png)
 
 ## Active battles
 
 See which worlds are contested, with the leading clan and closest rival shown for each world. Click **Invade** to hop to a rival's world, or **Defend** to jump to one your clan already holds.
 
+![Active battles](images/activebattles.png)
+
 ## Community Claims
 
 A running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in with a count-up animation. The counter shifts through increasingly rare colors as the total grows.
+
+![Community Claims](images/comclaim.png)
 
 ## Rally your clan in chat
 
@@ -42,7 +46,7 @@ Type `!defend 307` or `!invade 420` in clan chat (`!def` and `!inv` also work) t
 
 The GE is tinted on your minimap in the current owner's color. On the world map, the GE is outlined and filled with the owner's color and clan name, letting you see who controls it without being there. Multi-word clan names stack one word per line.
 
-![Minimap](images/minimap.png)
+![The war on the map](images/maps.png)
 
 ## Daily reset
 
