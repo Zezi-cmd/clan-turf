@@ -190,6 +190,11 @@ public class ClanTurfPlugin extends Plugin
 	private boolean leaderInit;
 	private long settleUntil;
 	private static final long SETTLE_MS = 3000; // server-mode window to absorb the initial snapshot
+	private boolean settling; // true during the post-arrival settle window (see updateLeader)
+	/** Tiles I've claimed since the current settle window began, so the pre-existing owner can be read
+	 * from the server snapshot without my own fresh claims counting. Lets a genuinely empty GE fire a
+	 * real takeover on my first claim, while arriving at already-owned turf stays silent. */
+	private final java.util.Set<String> arrivalTiles = new java.util.HashSet<>();
 	// Boundary animation state, read by the overlay.
 	private volatile long animStartMs;
 	private volatile Color animFrom;
@@ -210,7 +215,7 @@ public class ClanTurfPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new ClanTurfPanel(this::invade, this::clearOfflineTiles);
+		panel = new ClanTurfPanel(this::invade, this::clearOfflineTiles, this::setUseServer);
 		navButton = NavigationButton.builder()
 				.tooltip("Clan Turf")
 				.icon(buildIcon())
@@ -299,6 +304,16 @@ public class ClanTurfPlugin extends Plugin
 		triggerTileDissolve(); // fade the tiles out instead of a hard cut
 		localStore.clearClaims(client.getWorld());
 		refreshClaims();
+	}
+
+	/**
+	 * Flip the sync-server setting from the panel's Online/Offline toggle. Writing the config fires
+	 * onConfigChanged, which swaps the store live and calls setOfflineControls, so the panel toggle and
+	 * the settings checkbox always agree - this is just a convenient mirror of that one config item.
+	 */
+	private void setUseServer(boolean on)
+	{
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "useServer", on);
 	}
 
 	@Subscribe
@@ -434,6 +449,7 @@ public class ClanTurfPlugin extends Plugin
 				panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
 						effectiveClanName(), findBattle(world), store.connectionStatus(), clanHintDue());
 				panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
+				panel.setGlobalClaims(store.getGlobalClaims());
 			}
 		}
 
@@ -513,7 +529,6 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
-		lastTile = wp;
 
 		if (!GrandExchangeArea.contains(wp))
 		{
@@ -524,14 +539,37 @@ public class ClanTurfPlugin extends Plugin
 		String clanName = effectiveClanName();
 		if (clanName == null)
 		{
+			// Can't claim yet - e.g. the clan channel is still loading for a few seconds right after a
+			// world hop. Don't mark this tile as seen, so the claim retries and lands once the clan is
+			// available; otherwise the tile you hopped in on never gets claimed until you step off it.
 			return;
 		}
+		lastTile = wp; // mark seen only once we actually claim, so a not-yet-claimable tile is retried
 
 		ClanTurfPoint point = new ClanTurfPoint(
 				wp.getRegionID(), wp.getRegionX(), wp.getRegionY(), wp.getPlane(),
 				world, clanName);
 
+		// A genuine gain (for the community counter) is a tile not already ours - empty or a rival's.
+		// Re-walking our own turf claims nothing new, so it must not tick the counter (the server counts
+		// gains the same way, so the optimistic ticks stay in step with the authoritative total).
+		String tk = tileKey(point);
+		boolean gain = true;
+		for (ClanTurfPoint c : visibleClaims)
+		{
+			if (clanName.equals(c.getClanName()) && tk.equals(tileKey(c)))
+			{
+				gain = false;
+				break;
+			}
+		}
+
 		store.putClaim(point); // last-writer-wins = takeover; fires the change listener
+		arrivalTiles.add(tk); // one of my fresh claims - excluded from the pre-existing owner
+		if (gain && panel != null)
+		{
+			panel.addLocalClaim(); // tick the community counter for a genuine new/stolen tile only
+		}
 		log.debug("Claimed {},{} plane {} for {} on world {}",
 				wp.getRegionX(), wp.getRegionY(), wp.getPlane(), clanName, world);
 
@@ -1033,6 +1071,7 @@ public class ClanTurfPlugin extends Plugin
 		panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
 				effectiveClanName(), findBattle(world), store.connectionStatus(), clanHintDue());
 		panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
+		panel.setGlobalClaims(store.getGlobalClaims());
 	}
 
 	/** Committed (debounced) leading clan, for the boundary's resting color. Null = none. */
@@ -1068,21 +1107,41 @@ public class ClanTurfPlugin extends Plugin
 
 		if (!leaderInit)
 		{
-			// Baseline immediately so the boundary shows the right color right away. A brief
-			// settle window (server mode only) then absorbs the initial snapshot loading in, so
-			// arriving at pre-existing turf doesn't fire a bogus takeover. No sync dependency.
-			committedLeader = instant;
+			// New arrival (world hop, login, or GE re-entry): baseline the boundary to the PRE-EXISTING
+			// owner - the snapshot minus my own just-made claims - and start a short settle window. A
+			// rival's turf streaming in then doesn't fire a bogus takeover, but a genuinely empty GE
+			// stays "unowned", so my first claim there reads as a real takeover.
+			arrivalTiles.clear();
+			committedLeader = preExistingLeader();
 			pendingLeader = null;
 			leaderInit = true;
+			settling = true;
 			settleUntil = now + (store == serverStore ? SETTLE_MS : 0);
 			return;
 		}
 
 		if (now < settleUntil)
 		{
-			// Still settling after arrival: track the leader silently.
-			committedLeader = instant;
+			// Still settling: keep tracking the pre-existing owner (excludes my fresh claims), so the
+			// snapshot finishing loading can't be mistaken for a takeover.
+			committedLeader = preExistingLeader();
 			pendingLeader = null;
+			return;
+		}
+
+		if (settling)
+		{
+			// Settle just ended; committedLeader is the pre-existing owner. If my claims have since made
+			// me the leader - I took a genuinely empty GE, or out-tiled the old owner within the window -
+			// that's a real takeover, so fire it now (the settle window already served as the hold).
+			settling = false;
+			if (!Objects.equals(instant, committedLeader))
+			{
+				String previous = committedLeader;
+				committedLeader = instant;
+				pendingLeader = null;
+				onTakeover(previous, committedLeader);
+			}
 			return;
 		}
 
@@ -1198,6 +1257,35 @@ public class ClanTurfPlugin extends Plugin
 			return maxClan;
 		}
 		return currentCount > 0 ? current : maxClan;
+	}
+
+	/**
+	 * The GE's owner as it existed on arrival: the leader of the current claims MINUS the tiles I've
+	 * claimed since this settle window began. That's the server snapshot's owner (a rival, my own clan,
+	 * or nobody) without my just-made claims tipping it, so the settle logic can tell "I took an empty
+	 * GE" (returns null) from "I arrived on turf someone already held".
+	 */
+	private String preExistingLeader()
+	{
+		if (arrivalTiles.isEmpty())
+		{
+			return stickyLeader(visibleClaims, committedLeader);
+		}
+		java.util.List<ClanTurfPoint> pre = new java.util.ArrayList<>(visibleClaims.size());
+		for (ClanTurfPoint p : visibleClaims)
+		{
+			if (!arrivalTiles.contains(tileKey(p)))
+			{
+				pre.add(p);
+			}
+		}
+		return stickyLeader(pre, committedLeader);
+	}
+
+	/** Stable per-tile key (region id + local coords + plane) for the arrival-claims set. */
+	private static String tileKey(ClanTurfPoint p)
+	{
+		return p.getRegionId() + ":" + p.getRegionX() + ":" + p.getRegionY() + ":" + p.getZ();
 	}
 
 	/**

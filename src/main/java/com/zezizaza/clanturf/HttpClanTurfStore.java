@@ -75,6 +75,7 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile int activeWorld = -1;
 	private volatile List<ClanTurfPoint> cache = Collections.emptyList();
 	private volatile List<ClanTurfBattle> battles = Collections.emptyList();
+	private volatile long globalClaims; // all-time community total from /battles (0 until first poll)
 
 	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
 	private volatile long startedMs;
@@ -137,6 +138,12 @@ class HttpClanTurfStore implements ClanTurfStore
 	public List<ClanTurfBattle> getBattles()
 	{
 		return battles;
+	}
+
+	@Override
+	public long getGlobalClaims()
+	{
+		return globalClaims;
 	}
 
 	@Override
@@ -308,6 +315,18 @@ class HttpClanTurfStore implements ClanTurfStore
 		{
 			if (line.isBlank())
 			{
+				continue;
+			}
+			if (line.startsWith("GLOBAL,"))
+			{
+				try
+				{
+					globalClaims = Long.parseLong(line.substring(7).trim());
+				}
+				catch (NumberFormatException ignored)
+				{
+					// skip a malformed counter line
+				}
 				continue;
 			}
 			// world,owner,ownerTiles,totalTiles[,runnerUp,runnerUpTiles]; the last two are optional

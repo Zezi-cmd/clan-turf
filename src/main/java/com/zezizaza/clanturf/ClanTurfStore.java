@@ -78,6 +78,15 @@ interface ClanTurfStore
 		return Collections.emptyList();
 	}
 
+	/**
+	 * All-time community total of tiles claimed across everyone (the "Global Claims" counter). Only the
+	 * networked store reports a real number; local play has no shared total, so this is 0.
+	 */
+	default long getGlobalClaims()
+	{
+		return 0;
+	}
+
 	/** Start any background work (e.g. the sync poller). No-op for the local store. */
 	default void start()
 	{

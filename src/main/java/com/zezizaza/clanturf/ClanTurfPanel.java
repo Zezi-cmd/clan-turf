@@ -41,6 +41,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
@@ -69,8 +70,36 @@ class ClanTurfPanel extends PluginPanel
 	private final Leaderboard board = new Leaderboard();
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
-	private final JButton clearOfflineBtn = new JButton("Clear my tiles (offline only)");
+	private final JButton clearOfflineBtn = new JButton("Clear my tiles");
+	private final JButton serverToggleBtn = new JButton();
 	private final IntConsumer onInvade;
+	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
+	private boolean serverOn = true;             // current mode, mirrored from the config
+
+	// "Community Claims": the all-time community counter, shown only in server mode, with a count-up
+	// animation each time the total ticks up.
+	private final FadePanel globalBox = new FadePanel();
+	private final JLabel globalHeader = new JLabel("Community Claims");
+	private final JLabel globalCount = new JLabel();
+	private final JLabel globalSub = new JLabel();
+	private long globalShown;   // the number currently on screen
+	private long globalTarget;  // the latest total from the server, animated toward
+	private Timer globalTimer;  // eases globalShown up to globalTarget
+
+	// Coming-online reveal: when the sync toggle flips offline -> online, the sections cascade in - the
+	// bars fade via the scoreboard, then the battle rows one at a time, then the community counter.
+	private boolean revealBarsPending;
+	private boolean revealBattlesPending;
+	private boolean revealCommunityPending;
+	private long revealCommunityAt;
+	private long revealHoldUntil;   // hold the offline content until online data arrives, up to this time
+	private final Map<FadePanel, Long> reveals = new LinkedHashMap<>();
+	private Timer revealTimer;
+	private static final long REVEAL_FADE_MS = 160;       // per-element fade-in length
+	private static final long REVEAL_ROW_STAGGER = 55;    // gap between battle rows in the cascade
+	private static final long REVEAL_BATTLES_DELAY = 120; // battles start just after the bars
+	private static final long REVEAL_COMMUNITY_GAP = 130; // community starts after the battles cascade
+	private static final long REVEAL_HOLD_MS = 3000;      // max hold of offline content on coming online
 
 	/** Sticky scoreboard order (clan names) for the current world, so tied clans hold their slot
 	 * instead of shuffling when a new clan arrives. Reset when the world changes. */
@@ -80,10 +109,12 @@ class ClanTurfPanel extends PluginPanel
 	/**
 	 * @param onInvade      hop to the given world (from an Active battles "Invade"/"Defend" button)
 	 * @param onClearOffline wipe the current world's local claims (only wired while offline)
+	 * @param onSetServer   turn the sync server on/off (the panel's Online/Offline toggle)
 	 */
-	ClanTurfPanel(IntConsumer onInvade, Runnable onClearOffline)
+	ClanTurfPanel(IntConsumer onInvade, Runnable onClearOffline, Consumer<Boolean> onSetServer)
 	{
 		this.onInvade = onInvade;
+		this.onSetServer = onSetServer;
 
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -136,28 +167,99 @@ class ClanTurfPanel extends PluginPanel
 			}
 		});
 
+		// Online/Offline toggle, sitting next to the Clear button. Flips the sync-server config; the
+		// change swings back through setOfflineControls to relabel this and enable/disable Clear.
+		serverToggleBtn.setFont(FontManager.getRunescapeSmallFont());
+		serverToggleBtn.setFocusable(false);
+		serverToggleBtn.setMaximumSize(new Dimension(72, 28));
+		serverToggleBtn.setToolTipText("Online: your claims sync with every clan. Offline: local practice "
+				+ "only, nothing is sent.");
+		serverToggleBtn.addActionListener(e ->
+		{
+			if (onSetServer != null)
+			{
+				onSetServer.accept(!serverOn);
+			}
+		});
+
+		// "Community Claims": header, a large animated count, and a thank-you line. Hidden until a real
+		// total arrives (server mode only).
+		globalHeader.setFont(FontManager.getRunescapeBoldFont());
+		globalHeader.setForeground(Color.WHITE);
+		globalHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+		globalHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+
+		globalCount.setFont(FontManager.getRunescapeBoldFont().deriveFont(22f));
+		globalCount.setForeground(new Color(0xEB, 0xC7, 0x33)); // celebratory amber
+		globalCount.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		globalSub.setFont(FontManager.getRunescapeSmallFont());
+		globalSub.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		globalSub.setAlignmentX(Component.LEFT_ALIGNMENT);
+		globalSub.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+		globalSub.setText("<html><body style='width:170px'>Every tile claimed or stolen by everyone "
+				+ "playing Clan Turf since launch. THANK YOU for downloading my plugin and joining the "
+				+ "turf war! Keep pushing that number higher, maybe something interesting will happen"
+				+ "...</body></html>");
+
+		globalBox.setLayout(new BoxLayout(globalBox, BoxLayout.Y_AXIS));
+		globalBox.setOpaque(false);
+		globalBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+		globalBox.add(globalHeader);
+		globalBox.add(globalCount);
+		globalBox.add(globalSub);
+		globalBox.setVisible(false);
+
 		top.add(header);
 		top.add(headline);
 		top.add(clanHint);
 		top.add(board);
 		top.add(battlesHeader);
 		top.add(battlesBox);
+		top.add(globalBox);
 		top.add(Box.createVerticalStrut(12));
-		top.add(clearOfflineBtn);
+
+		// Bottom controls row: the Online/Offline toggle next to the Clear button.
+		JPanel controls = new JPanel();
+		controls.setLayout(new BoxLayout(controls, BoxLayout.X_AXIS));
+		controls.setOpaque(false);
+		controls.setAlignmentX(Component.LEFT_ALIGNMENT);
+		controls.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		controls.add(serverToggleBtn);
+		controls.add(Box.createHorizontalStrut(6));
+		controls.add(clearOfflineBtn);
+		top.add(controls);
 
 		add(top, BorderLayout.NORTH);
 
 		showEmpty("Waiting for the client…");
 	}
 
-	/** Enable the "Clear my tiles" button only while the sync server is off. The "(offline)" hint is
-	 * shown only when the button is greyed out (server mode), to explain why it is unavailable. */
+	/**
+	 * Reflect the current sync mode: relabel the Online/Offline toggle, and enable the Clear button only
+	 * while offline (so nobody can ever wipe shared/server turf from here). Called on startup and on any
+	 * change to the sync-server config, whether it came from this panel's toggle or the settings.
+	 */
 	void setOfflineControls(boolean offline)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
+			boolean wasOnline = serverOn;
+			serverOn = !offline;
+			serverToggleBtn.setText(serverOn ? "Online" : "Offline");
+			serverToggleBtn.setForeground(serverOn
+					? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
 			clearOfflineBtn.setEnabled(offline);
-			clearOfflineBtn.setText(offline ? "Clear my tiles" : "Clear my tiles (offline only)");
+			if (serverOn && !wasOnline)
+			{
+				// Just came online: hold the offline content until the server data loads (so it doesn't
+				// blank out), then cascade the sections in as each one's data arrives.
+				revealBarsPending = true;
+				revealBattlesPending = true;
+				revealCommunityPending = true;
+				revealCommunityAt = System.currentTimeMillis() + REVEAL_BATTLES_DELAY;
+				revealHoldUntil = System.currentTimeMillis() + REVEAL_HOLD_MS;
+			}
 		});
 	}
 
@@ -169,7 +271,205 @@ class ClanTurfPanel extends PluginPanel
 			headline.setText(message);
 			clanHint.setVisible(false);
 			board.setData(new ArrayList<>(), 0, null);
+			globalBox.setVisible(false);
 		});
+	}
+
+	/**
+	 * Feed the all-time community "Global Claims" total. Zero (local mode, or before the first poll)
+	 * hides the section; a higher number animates the counter up to it. The first real value snaps, so
+	 * we don't count up from zero across millions on login.
+	 */
+	void setGlobalClaims(long serverTotal)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			if (serverTotal <= 0)
+			{
+				globalBox.setVisible(false);
+				return;
+			}
+			globalBox.setVisible(true);
+			if (revealCommunityPending)
+			{
+				// Coming online: fade the whole section in, timed to land after the battles cascade.
+				revealCommunityPending = false;
+				scheduleReveal(globalBox, Math.max(revealCommunityAt, System.currentTimeMillis()));
+			}
+			if (globalTarget <= 0)
+			{
+				// First real total: snap, so we don't count up from zero across millions on login.
+				globalShown = serverTotal;
+				globalTarget = serverTotal;
+				showCount(serverTotal);
+				return;
+			}
+			// The server total is authoritative, but our optimistic local ticks can run ahead of it
+			// between polls, so only ever animate UP to it - never jump the counter backward.
+			if (serverTotal > globalTarget)
+			{
+				globalTarget = serverTotal;
+				startCountUp();
+			}
+		});
+	}
+
+	/**
+	 * One tile the local player just claimed: tick the counter up right away for instant feedback. The
+	 * periodic server total ({@link #setGlobalClaims}) then folds in everyone else's with a bigger
+	 * count-up. No-op until the first server total has arrived, so it only counts in server mode.
+	 */
+	void addLocalClaim()
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			if (globalTarget <= 0)
+			{
+				return; // no real total yet (local mode, or before the first poll)
+			}
+			globalTarget += 1;
+			startCountUp();
+		});
+	}
+
+	/** Eases the displayed number up to the latest target - bigger jumps first, settling in. */
+	private void startCountUp()
+	{
+		if (globalTimer != null && globalTimer.isRunning())
+		{
+			return; // already animating; it reads globalTarget each tick, so it chases the new value
+		}
+		globalTimer = new Timer(40, e ->
+		{
+			long diff = globalTarget - globalShown;
+			if (diff <= 0)
+			{
+				globalShown = globalTarget;
+				showCount(globalShown);
+				globalTimer.stop();
+				return;
+			}
+			globalShown += Math.max(1, diff / 8);
+			if (globalShown > globalTarget)
+			{
+				globalShown = globalTarget;
+			}
+			showCount(globalShown);
+		});
+		globalTimer.start();
+	}
+
+	private static String fmt(long v)
+	{
+		return String.format("%,d", v);
+	}
+
+	/** Set the community count text and color it by tier, so the number visibly climbs the ranks as the
+	 * community total grows (white -&gt; gold -&gt; green -&gt; cyan -&gt; purple -&gt; orange). */
+	private void showCount(long v)
+	{
+		globalCount.setText(fmt(v));
+		globalCount.setForeground(colorForClaims(v));
+	}
+
+	/** Tiered color for the community counter, loot-beam style: a bigger total climbs to a rarer color.
+	 * Thresholds and colors are easy to retune. */
+	private static Color colorForClaims(long n)
+	{
+		if (n >= 100_000_000L)
+		{
+			return new Color(0xFF7A33); // 100M+  orange
+		}
+		if (n >= 50_000_000L)
+		{
+			return new Color(0xB84BFF); // 50M+   purple
+		}
+		if (n >= 10_000_000L)
+		{
+			return new Color(0x33D6EB); // 10M+   cyan
+		}
+		if (n >= 1_000_000L)
+		{
+			return new Color(0x4BE04B); // 1M+    green
+		}
+		if (n >= 100_000L)
+		{
+			return new Color(0xEBC733); // 100k+  gold
+		}
+		return Color.WHITE;             // < 100k white
+	}
+
+	/** A panel that can be faded in (alpha 0 -&gt; 1), used for the coming-online reveal cascade. */
+	private static final class FadePanel extends JPanel
+	{
+		private float alpha = 1f;
+
+		FadePanel()
+		{
+			setOpaque(false); // non-opaque so the fade composites cleanly over the parent
+		}
+
+		FadePanel(java.awt.LayoutManager layout)
+		{
+			super(layout);
+			setOpaque(false); // non-opaque so the fade composites cleanly over the parent
+		}
+
+		void setAlpha(float a)
+		{
+			alpha = Math.max(0f, Math.min(1f, a));
+			repaint();
+		}
+
+		@Override
+		public void paint(Graphics g)
+		{
+			if (alpha >= 1f)
+			{
+				super.paint(g);
+				return;
+			}
+			Graphics2D g2 = (Graphics2D) g.create();
+			g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+			super.paint(g2);
+			g2.dispose();
+		}
+	}
+
+	/** Fade a panel in starting at {@code startMs} (epoch ms), driven by one shared reveal timer. */
+	private void scheduleReveal(FadePanel c, long startMs)
+	{
+		c.setAlpha(0f);
+		reveals.put(c, startMs);
+		if (revealTimer == null)
+		{
+			revealTimer = new Timer(25, e -> tickReveals());
+		}
+		if (!revealTimer.isRunning())
+		{
+			revealTimer.start();
+		}
+	}
+
+	private void tickReveals()
+	{
+		long now = System.currentTimeMillis();
+		Iterator<Map.Entry<FadePanel, Long>> it = reveals.entrySet().iterator();
+		while (it.hasNext())
+		{
+			Map.Entry<FadePanel, Long> e = it.next();
+			long start = e.getValue();
+			float a = now <= start ? 0f : Math.min(1f, (now - start) / (float) REVEAL_FADE_MS);
+			e.getKey().setAlpha(a);
+			if (a >= 1f)
+			{
+				it.remove();
+			}
+		}
+		if (reveals.isEmpty())
+		{
+			revealTimer.stop();
+		}
 	}
 
 	/**
@@ -221,6 +521,18 @@ class ClanTurfPanel extends PluginPanel
 
 		SwingUtilities.invokeLater(() ->
 		{
+			if (revealBarsPending)
+			{
+				// Coming online: hold the offline bars until the server's claims load (empty until the
+				// first poll), instead of blanking them. Checked here on the EDT so it sees the flag that
+				// setOfflineControls arms (also on the EDT). Release on real data, or when the hold times out.
+				if (ordered.isEmpty() && System.currentTimeMillis() < revealHoldUntil)
+				{
+					return;
+				}
+				revealBarsPending = false;
+			}
+
 			header.setText("Clan Turf - World " + world);
 			clanHint.setVisible(clanless);
 
@@ -284,6 +596,10 @@ class ClanTurfPanel extends PluginPanel
 		List<ClanTurfBattle> list = battles != null ? new ArrayList<>(battles) : new ArrayList<>();
 		SwingUtilities.invokeLater(() ->
 		{
+			if (revealBattlesPending && list.isEmpty() && System.currentTimeMillis() < revealHoldUntil)
+			{
+				return; // coming online: hold the offline battles until the server's load in
+			}
 			battlesBox.removeAll();
 			if (list.isEmpty())
 			{
@@ -295,9 +611,24 @@ class ClanTurfPanel extends PluginPanel
 			}
 			else
 			{
+				boolean cascade = revealBattlesPending; // set when we just came online
+				revealBattlesPending = false;
+				long base = System.currentTimeMillis() + REVEAL_BATTLES_DELAY;
+				int i = 0;
 				for (ClanTurfBattle b : list)
 				{
-					battlesBox.add(battleRow(b, myClan, currentWorld));
+					FadePanel row = battleRow(b, myClan, currentWorld);
+					battlesBox.add(row);
+					if (cascade)
+					{
+						scheduleReveal(row, base + i * REVEAL_ROW_STAGGER); // top-down cascade
+					}
+					i++;
+				}
+				if (cascade)
+				{
+					// Line the community counter up to arrive just after the last battle row.
+					revealCommunityAt = base + (long) list.size() * REVEAL_ROW_STAGGER + REVEAL_COMMUNITY_GAP;
 				}
 			}
 			battlesBox.revalidate();
@@ -337,9 +668,9 @@ class ClanTurfPanel extends PluginPanel
 		return base;
 	}
 
-	private JPanel battleRow(ClanTurfBattle b, String myClan, int currentWorld)
+	private FadePanel battleRow(ClanTurfBattle b, String myClan, int currentWorld)
 	{
-		JPanel row = new JPanel(new BorderLayout(6, 0));
+		FadePanel row = new FadePanel(new BorderLayout(6, 0));
 		boolean mine = b.getOwner() != null && b.getOwner().equalsIgnoreCase(myClan);
 		boolean current = b.getWorld() == currentWorld; // the world you're on: no button, larger text
 		// Every row gets a left accent bar in the owning clan's color (a quick "who holds this world"
@@ -371,16 +702,16 @@ class ClanTurfPanel extends PluginPanel
 			String matchup;
 			if (b.getRunnerUp() != null)
 			{
-				// Owner column right-aligned and rival column left-aligned, so both clans hug the
-				// centered "vs" with equal spacing; each clan's tiles sit directly beneath its name.
+				// Each clan and its tile count are centered in one column, so the clan name sits
+				// directly above its tiles, with the "vs" between the two columns.
 				String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
 				String upName = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
 						+ "</span>";
 				matchup = "<html><table cellpadding=0 cellspacing=0>"
-						+ "<tr><td align='right'>" + ownerName + "</td><td>&nbsp;vs&nbsp;</td>"
-						+ "<td align='left'>" + upName + "</td></tr>"
-						+ "<tr><td align='right'>" + b.getOwnerTiles() + tileWord(b.getOwnerTiles())
-						+ "</td><td></td><td align='left'>" + b.getRunnerUpTiles()
+						+ "<tr><td align='center'>" + ownerName + "</td><td>&nbsp;vs&nbsp;</td>"
+						+ "<td align='center'>" + upName + "</td></tr>"
+						+ "<tr><td align='center'>" + b.getOwnerTiles() + tileWord(b.getOwnerTiles())
+						+ "</td><td></td><td align='center'>" + b.getRunnerUpTiles()
 						+ tileWord(b.getRunnerUpTiles()) + "</td></tr></table></html>";
 			}
 			else
