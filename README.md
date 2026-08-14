@@ -40,7 +40,7 @@ A running all-time counter tracks every tile claimed or stolen across every clan
 
 ## Practice offline
 
-Offline mode lets you experiment with Clan Turf without connecting to the sync server. Only your local claims are shown and nothing is sent. **Clear my tiles** is available offline to wipe the current world's local claims.
+The two buttons under Community Claims are the **Online/Offline** toggle and **Clear my tiles**. Offline mode lets you experiment with Clan Turf without connecting to the sync server. Only your local claims are shown and nothing is sent. **Clear my tiles** is available offline to wipe the current world's local claims.
 
 ## Rally your clan in chat
 
