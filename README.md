@@ -88,14 +88,15 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 - **Tile fill opacity** - How solid claimed tiles look.
 - **Draw tile outline** / **Tile outline opacity** - Outline each clan's territory, and how strong it is.
 - **Tint GE on minimap** / **Minimap opacity** - Shade the GE on the minimap in the owner's color, and how strong.
-- **Show GE on world map** - Outline the GE on the world map in the owner's color with the clan name. Works anywhere.
+- **Tint GE on world map** / **Worldmap opacity** - Shade and outline the GE on the world map in the owner's color with the clan name (works anywhere), and how strong the tint is.
+- **Show GE boundary** - Draw the GE border line on screen.
 - **Show Pre-Claims** - Fill the unwalkable GE pockets in the owner's color (white when unclaimed). Cosmetic; never counted.
 - **Snail trail** - Leave a fading clan-colored trail behind you. Does not affect claims or TPH.
+- **Tile walls** - Toggle all raised wall effects: tile captures, takeovers, and the snail trail.
 
 ### Takeover
 
-- **Show GE boundary** / **Border animation** - Draw the GE border, and whether a takeover raises the wall or fades a flat line.
-- **Tile walls** - Toggle all raised wall effects: tile captures, takeovers, and the snail trail.
+- **Border animation** - On a takeover, raise the boundary into a wall, or just fade it to the new color (flat).
 - **Announce takeovers** - Post a clan-tab message when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud.
 

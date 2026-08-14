@@ -110,10 +110,10 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "showBoundary",
-			section = takeoverSection,
+			section = appearanceSection,
 			name = "Show GE boundary",
 			description = "Draw the GE boundary line (and the takeover animation) on screen.",
-			position = 3
+			position = 9
 	)
 	default boolean showBoundary()
 	{
@@ -140,7 +140,7 @@ public interface ClanTurfConfig extends Config
 			description = "Leave a fading trail in your clan color under your character as it runs across "
 					+ "the GE, including the in-between tiles you skip while running. Purely visual - the "
 					+ "tiles you actually claim, and your tiles/hour, are exactly the same as with it off.",
-			position = 9
+			position = 11
 	)
 	default boolean snailTrail()
 	{
@@ -175,7 +175,7 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(
 			keyName = "worldMap",
 			section = appearanceSection,
-			name = "Show GE on world map",
+			name = "Tint GE on world map",
 			description = "Draw the Grand Exchange on the world map (the globe icon) in the current owner "
 					+ "clan's color, with the clan's name across it. Works anywhere - you don't have to be "
 					+ "at the GE to see who holds it on your world.",
@@ -187,13 +187,26 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
+			keyName = "worldMapOpacity",
+			section = appearanceSection,
+			name = "Worldmap opacity",
+			description = "How strong the world map GE tint is (0 = invisible, 100 = full).",
+			position = 8
+	)
+	@Range(min = 0, max = 100)
+	default int worldMapOpacity()
+	{
+		return 100;
+	}
+
+	@ConfigItem(
 			keyName = "showPreClaims",
 			section = appearanceSection,
 			name = "Show Pre-Claims",
 			description = "Fill the unwalkable GE pockets (the central building, stalls, staircases) in the "
 					+ "current owner's color so a clan's turf reads solid, white when unclaimed. Off leaves "
 					+ "them empty. Either way these tiles are never claimable and never counted.",
-			position = 8
+			position = 10
 	)
 	default boolean showPreClaims()
 	{
@@ -241,12 +254,12 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "tileWalls",
-			section = takeoverSection,
+			section = appearanceSection,
 			name = "Tile walls",
 			description = "Show the raised tile effects: the wall pop when a tile is taken from a rival, "
 					+ "the walls and shimmer that rise near you on a takeover, and the cascading walls of "
 					+ "the snail trail. Off = flat tiles everywhere (a snail trail then just fades).",
-			position = 5
+			position = 12
 	)
 	default boolean tileWalls()
 	{

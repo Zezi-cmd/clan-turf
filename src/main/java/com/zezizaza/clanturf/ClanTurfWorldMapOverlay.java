@@ -115,9 +115,13 @@ class ClanTurfWorldMapOverlay extends Overlay
 		Shape origClip = graphics.getClip();
 		graphics.setClip(map.getBounds());
 
-		graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), FILL_ALPHA));
+		// Scale the tint by the Worldmap opacity slider (0-100), same as the minimap tint.
+		int op = Math.max(0, Math.min(100, config.worldMapOpacity()));
+		int fillAlpha = FILL_ALPHA * op / 100;
+		int lineAlpha = LINE_ALPHA * op / 100;
+		graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), fillAlpha));
 		graphics.fill(poly);
-		graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), LINE_ALPHA));
+		graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), lineAlpha));
 		graphics.setStroke(new BasicStroke(2f));
 		graphics.draw(poly);
 
