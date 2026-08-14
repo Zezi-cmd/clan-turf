@@ -34,9 +34,12 @@ import java.time.ZonedDateTime;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
@@ -66,6 +69,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
@@ -86,6 +90,7 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ScheduledExecutorService executor;
 	@Inject private OverlayManager overlayManager;
 	@Inject private ClientToolbar clientToolbar;
+	@Inject private ColorPickerManager colorPickerManager;
 	@Inject private WorldService worldService;
 	@Inject private ConfigManager configManager;
 	@Inject private ClanTurfConfig config;
@@ -128,7 +133,8 @@ public class ClanTurfPlugin extends Plugin
 	private static final long CLAN_GRACE_MS = 6000L;
 
 	/** The clan name we currently have a local color override registered for (custom clan color). */
-	private String ownColorClan;
+	/** Clans (lower-case) we've locally recolored from the color list, so we can clear them on a change. */
+	private final Set<String> whitelistApplied = new HashSet<>();
 
 	/** Tiles-per-hour tracker: every claim this session (each new tile you step onto, retakes
 	 * included), the timestamp of the first claim, and a once-per-second cached rate so the
@@ -216,7 +222,8 @@ public class ClanTurfPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new ClanTurfPanel(this::invade, this::clearOfflineTiles, this::setUseServer);
+		panel = new ClanTurfPanel(this::invade, this::clearOfflineTiles, this::setUseServer,
+				colorPickerManager, this::onClanColorChosen);
 		navButton = NavigationButton.builder()
 				.tooltip("Clan Turf")
 				.icon(buildIcon())
@@ -243,14 +250,10 @@ public class ClanTurfPlugin extends Plugin
 		animStartMs = 0;
 		animFrom = null;
 		animTo = null;
-		// Pre-register the remembered clan's custom color so the first frame after login is already
-		// right, instead of showing the auto color until the clan channel loads seconds later.
-		ownColorClan = null;
-		if (config.customClanColor() && !config.lastOwnClan().isEmpty())
-		{
-			ownColorClan = config.lastOwnClan();
-			ClanTurfColors.setOverride(ownColorClan, config.clanColor());
-		}
+		// Custom clan colors come entirely from the color list (keyed by clan name), so they apply on
+		// login right away - no waiting for the clan channel.
+		ClanTurfColors.setColorblindMode(config.colorblindMode());
+		applyWhitelist();
 		refreshClaims();
 	}
 
@@ -271,11 +274,12 @@ public class ClanTurfPlugin extends Plugin
 		visibleClaims = Collections.emptyList();
 		lastTile = null;
 		lastWorld = -1;
-		if (ownColorClan != null)
+		for (String c : whitelistApplied)
 		{
-			ClanTurfColors.removeOverride(ownColorClan);
-			ownColorClan = null;
+			ClanTurfColors.removeOverride(c);
 		}
+		whitelistApplied.clear();
+		ClanTurfColors.setColorblindMode(ColorblindMode.NONE);
 	}
 
 	/** Picks the local or networked store from the config and starts it. */
@@ -322,8 +326,13 @@ public class ClanTurfPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
+		if (!ConfigClanTurfStore.GROUP.equals(event.getGroup()))
+		{
+			return;
+		}
+		String key = event.getKey();
 		// Make "Use sync server" take effect immediately instead of needing a plugin off/on.
-		if (ConfigClanTurfStore.GROUP.equals(event.getGroup()) && "useServer".equals(event.getKey()))
+		if ("useServer".equals(key))
 		{
 			if (store != null)
 			{
@@ -333,6 +342,17 @@ public class ClanTurfPlugin extends Plugin
 			selectStore();
 			leaderInit = false;
 			committedLeader = null;
+			refreshClaims();
+		}
+		// Recolor live when the custom-color toggle or the clan color list changes.
+		else if ("customClanColor".equals(key) || "clanColorWhitelist".equals(key))
+		{
+			applyWhitelist();
+			refreshClaims();
+		}
+		else if ("colorblindMode".equals(key))
+		{
+			ClanTurfColors.setColorblindMode(config.colorblindMode());
 			refreshClaims();
 		}
 	}
@@ -393,8 +413,6 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
-
-		updateOwnClanColor();
 
 		// Track how long we've had no clan channel, so the panel doesn't call a clan member "clan-less"
 		// during the seconds it takes the channel to load after login (or reload after a hop).
@@ -789,43 +807,98 @@ public class ClanTurfPlugin extends Plugin
 	}
 
 	/**
-	 * Registers (or clears) a local color override for the player's own clan, from the "Custom
-	 * clan color" setting. Everything paints through {@link ClanTurfColors#forClan}, so this one
-	 * registration recolors the player's tiles, outline, boundary, minimap and panel at once.
+	 * Applies the "Clan color list" overrides (any clan, including your own), local only. Clears
+	 * whatever it applied last time first (so removed entries revert to their auto color), then
+	 * re-registers the current list. Gated by the "Custom clan colors" toggle. Everything paints
+	 * through {@link ClanTurfColors#forClan}, so these recolor tiles, outline, boundary, minimap and
+	 * panel at once.
 	 */
-	private void updateOwnClanColor()
+	private void applyWhitelist()
 	{
+		for (String c : whitelistApplied)
+		{
+			ClanTurfColors.removeOverride(c);
+		}
+		whitelistApplied.clear();
 		if (!config.customClanColor())
 		{
-			// Feature off: make sure no override lingers.
-			if (ownColorClan != null)
-			{
-				ClanTurfColors.removeOverride(ownColorClan);
-				ownColorClan = null;
-			}
 			return;
 		}
-
-		String clan = effectiveClanName();
-		if (clan == null)
+		for (Map.Entry<String, Color> e : parseWhitelist(config.clanColorWhitelist()).entrySet())
 		{
-			// Clan channel not loaded yet (right after login / a world hop). Keep whatever override
-			// we already have rather than dropping it, so tiles don't flash back to the auto color.
+			ClanTurfColors.setOverride(e.getKey(), e.getValue());
+			whitelistApplied.add(e.getKey().toLowerCase());
+		}
+	}
+
+	/** Parse "ClanName=RRGGBB,Other=00FF00" into clan -&gt; color; bad entries are skipped. */
+	private static Map<String, Color> parseWhitelist(String raw)
+	{
+		Map<String, Color> out = new LinkedHashMap<>();
+		if (raw == null || raw.trim().isEmpty())
+		{
+			return out;
+		}
+		for (String part : raw.split(","))
+		{
+			int eq = part.lastIndexOf('=');
+			if (eq <= 0)
+			{
+				continue;
+			}
+			String name = part.substring(0, eq).trim();
+			String hex = part.substring(eq + 1).trim().replace("#", "");
+			if (name.isEmpty() || hex.length() != 6)
+			{
+				continue;
+			}
+			try
+			{
+				out.put(name, new Color(Integer.parseInt(hex, 16)));
+			}
+			catch (NumberFormatException ignored)
+			{
+				// skip a malformed hex value
+			}
+		}
+		return out;
+	}
+
+	/** Insert or replace one clan's color in the list string (case-insensitive on the name). */
+	private static String upsertWhitelist(String raw, String clan, Color color)
+	{
+		Map<String, Color> map = parseWhitelist(raw);
+		map.entrySet().removeIf(e -> e.getKey().equalsIgnoreCase(clan));
+		map.put(clan, color);
+		StringBuilder sb = new StringBuilder();
+		for (Map.Entry<String, Color> e : map.entrySet())
+		{
+			if (sb.length() > 0)
+			{
+				sb.append(',');
+			}
+			Color c = e.getValue();
+			sb.append(e.getKey()).append('=')
+					.append(String.format("%02X%02X%02X", c.getRed(), c.getGreen(), c.getBlue()));
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * A color chosen from the side-panel color wheel for {@code clan} (any clan, including your own) is
+	 * upserted into the shared "Clan color list" and the "Custom clan colors" master toggle is switched
+	 * on so it takes effect. The config writes fan back through {@link #onConfigChanged}, which re-applies
+	 * the overrides and repaints. Runs on the Swing EDT; config writes are thread-safe.
+	 */
+	void onClanColorChosen(String clan, Color color)
+	{
+		if (clan == null || color == null)
+		{
 			return;
 		}
-
-		if (!clan.equals(ownColorClan))
-		{
-			if (ownColorClan != null)
-			{
-				ClanTurfColors.removeOverride(ownColorClan);
-			}
-			ownColorClan = clan;
-			// Remember it so next login can paint the right color immediately, before the clan
-			// channel has loaded (which is what caused the long hashed-color pause).
-			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lastOwnClan", clan);
-		}
-		ClanTurfColors.setOverride(clan, config.clanColor());
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "customClanColor", true);
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "clanColorWhitelist",
+				upsertWhitelist(config.clanColorWhitelist(), clan, color));
 	}
 
 	/** Invade a battle's world: stage a quick-hop. Called from the panel on the Swing EDT. */

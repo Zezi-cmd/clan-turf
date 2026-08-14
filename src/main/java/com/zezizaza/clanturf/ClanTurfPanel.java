@@ -29,18 +29,23 @@ import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.Window;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
@@ -54,6 +59,8 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import net.runelite.client.ui.ColorScheme;
+import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
+import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 
@@ -67,13 +74,15 @@ class ClanTurfPanel extends PluginPanel
 	private final JLabel header = new JLabel();
 	private final JLabel headline = new JLabel();
 	private final JLabel clanHint = new JLabel();
-	private final Leaderboard board = new Leaderboard();
+	private final Leaderboard board = new Leaderboard(this::openColorPicker);
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
 	private final JButton clearOfflineBtn = new JButton("Clear my tiles");
 	private final JButton serverToggleBtn = new JButton();
 	private final IntConsumer onInvade;
 	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
+	private final ColorPickerManager colorPickerManager;
+	private final BiConsumer<String, Color> onClanColorChosen; // (clan, chosen color) -> plugin persists
 	private boolean serverOn = true;             // current mode, mirrored from the config
 
 	// "Community Claims": the all-time community counter, shown only in server mode, with a count-up
@@ -112,14 +121,19 @@ class ClanTurfPanel extends PluginPanel
 	private final List<String> boardOrder = new ArrayList<>();
 
 	/**
-	 * @param onInvade      hop to the given world (from an Active battles "Invade"/"Defend" button)
-	 * @param onClearOffline wipe the current world's local claims (only wired while offline)
-	 * @param onSetServer   turn the sync server on/off (the panel's Online/Offline toggle)
+	 * @param onInvade           hop to the given world (from an Active battles "Invade"/"Defend" button)
+	 * @param onClearOffline     wipe the current world's local claims (only wired while offline)
+	 * @param onSetServer        turn the sync server on/off (the panel's Online/Offline toggle)
+	 * @param colorPickerManager opens the RuneLite color wheel when a scoreboard bar is clicked
+	 * @param onClanColorChosen  (clan, chosen color) - the plugin persists it (own color vs color list)
 	 */
-	ClanTurfPanel(IntConsumer onInvade, Runnable onClearOffline, Consumer<Boolean> onSetServer)
+	ClanTurfPanel(IntConsumer onInvade, Runnable onClearOffline, Consumer<Boolean> onSetServer,
+			ColorPickerManager colorPickerManager, BiConsumer<String, Color> onClanColorChosen)
 	{
 		this.onInvade = onInvade;
 		this.onSetServer = onSetServer;
+		this.colorPickerManager = colorPickerManager;
+		this.onClanColorChosen = onClanColorChosen;
 
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -668,7 +682,10 @@ class ClanTurfPanel extends PluginPanel
 		{
 			sb.append(b.getWorld()).append(',').append(b.getOwner()).append(',')
 					.append(b.getOwnerTiles()).append(',').append(b.getTotalTiles()).append(',')
-					.append(b.getRunnerUp()).append(',').append(b.getRunnerUpTiles()).append(';');
+					.append(b.getRunnerUp()).append(',').append(b.getRunnerUpTiles()).append(',')
+					// Include the clans' current colors so a recolor rebuilds the rows too.
+					.append(ClanTurfColors.forClan(b.getOwner()).getRGB()).append(',')
+					.append(ClanTurfColors.forClan(b.getRunnerUp()).getRGB()).append(';');
 		}
 		return sb.toString();
 	}
@@ -850,10 +867,32 @@ class ClanTurfPanel extends PluginPanel
 	}
 
 	/**
+	 * Opens the RuneLite color wheel for a clan (from clicking its scoreboard bar), seeded with that
+	 * clan's current color. On close the chosen color goes to the plugin, which persists it as your own
+	 * color or into the shared clan color list. Local only - nobody else sees your palette.
+	 */
+	private void openColorPicker(String clan)
+	{
+		if (clan == null || clan.isEmpty() || colorPickerManager == null)
+		{
+			return;
+		}
+		Window parent = SwingUtilities.getWindowAncestor(this);
+		RuneliteColorPicker picker = colorPickerManager.create(
+				parent, ClanTurfColors.forClan(clan), "Color for " + clan, true);
+		picker.setLocationRelativeTo(parent);
+		picker.setOnClose(c -> onClanColorChosen.accept(clan, c));
+		picker.setVisible(true);
+	}
+
+	/**
 	 * A ranked bar chart. Each clan gets a full-width row whose colored fill is scaled to the
 	 * leader (leader = full bar), with rank, name, tile count and GE% drawn over it. When the
 	 * standings change, rows slide to their new slot and bars grow/shrink to their new length
 	 * rather than snapping - a Swing timer eases the displayed values toward the targets.
+	 *
+	 * <p>Bars are interactive: hovering highlights the row, and clicking opens the color wheel for
+	 * that clan via {@code onClickClan}.
 	 */
 	private static final class Leaderboard extends JComponent
 	{
@@ -873,11 +912,65 @@ class ClanTurfPanel extends PluginPanel
 		private double targetLeader = 1;
 		private boolean opened;          // snap the very first fill (login/open); animate re-entries
 		private final Timer timer;
+		private final Consumer<String> onClickClan; // clicking a bar -> recolor that clan
+		private String hoveredClan;                 // bar under the cursor, for the hover highlight
 
-		Leaderboard()
+		Leaderboard(Consumer<String> onClickClan)
 		{
+			this.onClickClan = onClickClan;
 			setForeground(Color.WHITE);
 			timer = new Timer(16, e -> tick());
+			MouseAdapter ma = new MouseAdapter()
+			{
+				@Override
+				public void mouseMoved(MouseEvent e)
+				{
+					setHover(clanAt(e.getY()));
+				}
+
+				@Override
+				public void mouseExited(MouseEvent e)
+				{
+					setHover(null);
+				}
+
+				@Override
+				public void mousePressed(MouseEvent e)
+				{
+					String clan = clanAt(e.getY());
+					if (clan != null && Leaderboard.this.onClickClan != null)
+					{
+						Leaderboard.this.onClickClan.accept(clan);
+					}
+				}
+			};
+			addMouseListener(ma);
+			addMouseMotionListener(ma);
+		}
+
+		/** The clan whose bar currently sits under mouse-y, or null. */
+		private String clanAt(int my)
+		{
+			for (Row r : rows.values())
+			{
+				int top = (int) Math.round(r.y);
+				if (!r.leaving && my >= top && my < top + ROW_H)
+				{
+					return r.clan;
+				}
+			}
+			return null;
+		}
+
+		private void setHover(String clan)
+		{
+			if (!java.util.Objects.equals(clan, hoveredClan))
+			{
+				hoveredClan = clan;
+				setCursor(clan != null
+						? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+				repaint();
+			}
 		}
 
 		void setData(List<Entry> entries, int totalTiles, String myClan)
@@ -1056,6 +1149,13 @@ class ClanTurfPanel extends PluginPanel
 				{
 					g2.setColor(ColorScheme.MEDIUM_GRAY_COLOR);
 					g2.drawRoundRect(0, barY, w - 1, BAR_H, arc, arc);
+				}
+
+				// Hover highlight: a soft brightening over the row under the cursor (click to recolor).
+				if (hoveredClan != null && r.clan.equalsIgnoreCase(hoveredClan))
+				{
+					g2.setColor(new Color(255, 255, 255, 45));
+					g2.fillRoundRect(0, barY, w - 1, BAR_H, arc, arc);
 				}
 
 				// Rank + name (left), tiles + GE% (right), over a soft shadow for legibility.

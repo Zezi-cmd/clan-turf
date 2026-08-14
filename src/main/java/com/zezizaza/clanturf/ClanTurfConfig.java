@@ -24,7 +24,6 @@
  */
 package com.zezizaza.clanturf;
 
-import java.awt.Color;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -141,7 +140,7 @@ public interface ClanTurfConfig extends Config
 			description = "Leave a fading trail in your clan color under your character as it runs across "
 					+ "the GE, including the in-between tiles you skip while running. Purely visual - the "
 					+ "tiles you actually claim, and your tiles/hour, are exactly the same as with it off.",
-			position = 3
+			position = 9
 	)
 	default boolean snailTrail()
 	{
@@ -183,6 +182,20 @@ public interface ClanTurfConfig extends Config
 			position = 7
 	)
 	default boolean worldMap()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+			keyName = "showPreClaims",
+			section = appearanceSection,
+			name = "Show Pre-Claims",
+			description = "Fill the unwalkable GE pockets (the central building, stalls, staircases) in the "
+					+ "current owner's color so a clan's turf reads solid, white when unclaimed. Off leaves "
+					+ "them empty. Either way these tiles are never claimable and never counted.",
+			position = 8
+	)
+	default boolean showPreClaims()
 	{
 		return true;
 	}
@@ -233,7 +246,7 @@ public interface ClanTurfConfig extends Config
 			description = "Show the raised tile effects: the wall pop when a tile is taken from a rival, "
 					+ "the walls and shimmer that rise near you on a takeover, and the cascading walls of "
 					+ "the snail trail. Off = flat tiles everywhere (a snail trail then just fades).",
-			position = 10
+			position = 5
 	)
 	default boolean tileWalls()
 	{
@@ -243,11 +256,24 @@ public interface ClanTurfConfig extends Config
 	// ------------------------------------------------------------------ clan
 
 	@ConfigItem(
+			keyName = "clanChatCommands",
+			section = clanSection,
+			name = "Clan chat commands",
+			description = "Turn !defend<world> and !invade<world> typed in clan chat into formatted "
+					+ "Clan Turf calls, validated against the battles board.",
+			position = 11
+	)
+	default boolean clanChatCommands()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 			keyName = "customClanColor",
 			section = clanSection,
-			name = "Custom clan color",
-			description = "Paint your own clan's tiles a color you pick instead of the auto-assigned "
-					+ "one. Local only - other players still see their own colors.",
+			name = "Custom clan colors",
+			description = "Apply the clan color list below. Local only - other players still see their own "
+					+ "colors. Off ignores the list and every clan uses its auto color.",
 			position = 12
 	)
 	default boolean customClanColor()
@@ -256,28 +282,17 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
-			keyName = "clanColor",
+			keyName = "clanColorWhitelist",
 			section = clanSection,
-			name = "Your clan color",
-			description = "Color for your own clan's tiles when 'Custom clan color' is on.",
+			name = "Clan color list",
+			description = "Per-clan colors, local only, as ClanName=RRGGBB separated by commas "
+					+ "(e.g. Wrath=EC1F1F,Some Clan=228B22). Click any clan's bar in the side panel - your own "
+					+ "included - to set one with the color wheel. Easy to copy and paste to share a palette.",
 			position = 13
 	)
-	default Color clanColor()
+	default String clanColorWhitelist()
 	{
-		return Color.RED;
-	}
-
-	@ConfigItem(
-			keyName = "clanChatCommands",
-			section = clanSection,
-			name = "Clan chat commands",
-			description = "Turn !defend<world> and !invade<world> typed in clan chat into formatted "
-					+ "Clan Turf calls, validated against the battles board.",
-			position = 14
-	)
-	default boolean clanChatCommands()
-	{
-		return true;
+		return "";
 	}
 
 	// ------------------------------------------------------------------ sync
@@ -323,6 +338,20 @@ public interface ClanTurfConfig extends Config
 	default boolean showTileTracker()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+			keyName = "colorblindMode",
+			section = extrasSection,
+			name = "Colorblind",
+			description = "Adjust every clan color to be easier to tell apart for a type of color blindness "
+					+ "(daltonization): Protanopia (red), Deuteranopia (green), Tritanopia (blue). Applies to "
+					+ "auto colors and your custom color list. Local only.",
+			position = 17
+	)
+	default ColorblindMode colorblindMode()
+	{
+		return ColorblindMode.NONE;
 	}
 
 	// -------------------------------------------------------------- hidden / internal
@@ -539,6 +568,7 @@ public interface ClanTurfConfig extends Config
 		return 215;
 	}
 
+
 	@ConfigItem(
 			keyName = "serverUrl",
 			section = networkSection,
@@ -560,19 +590,6 @@ public interface ClanTurfConfig extends Config
 			hidden = true
 	)
 	default String serverAdminToken()
-	{
-		return "";
-	}
-
-	@ConfigItem(
-			keyName = "lastOwnClan",
-			name = "Last own clan",
-			description = "Internal: the last clan we applied your custom color to, so the color is "
-					+ "right immediately on the next login.",
-			position = 122,
-			hidden = true
-	)
-	default String lastOwnClan()
 	{
 		return "";
 	}

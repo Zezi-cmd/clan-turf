@@ -20,11 +20,21 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 ![Takeover](images/takeover.png)
 
+## Pre-claimed pockets
+
+Parts of the Grand Exchange aren't walkable - the central building, the stalls, the staircases. Rather than leave holes in a clan's territory, Clan Turf fills those pockets in the current owner's color (white while the GE is unclaimed) so turf reads as one solid block, and they recolor on takeover right along with the boundary. Purely cosmetic: these tiles are never claimable and never counted. Turn it off with **Show Pre-Claims**.
+
 ## Live scoreboard
 
 The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds.
 
 ![Scoreboard](images/scoreboard.png)
+
+## Pick your clan colors
+
+Every clan is auto-assigned its own color, but you can override any of them. Hover a bar in the side panel to highlight it and click to open the color wheel - pick a color for your own clan or a rival's. Your picks are saved to a local color list you can copy and paste to share a whole palette with clanmates. It's all local, so everyone else still sees their own colors.
+
+Colorblind? A **Colorblind** mode in the settings adjusts every clan color, auto and custom alike, to be easier to tell apart - protanopia, deuteranopia, or tritanopia.
 
 ## Active battles
 
@@ -73,23 +83,37 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 
 ## Configuration
 
+### Appearance
+
 - **Tile fill opacity** - How solid claimed tiles look.
 - **Draw tile outline** / **Tile outline opacity** - Outline each clan's territory, and how strong it is.
-- **Snail trail** - Leave a fading clan-colored trail behind you. Does not affect claims or TPH.
-- **Show GE boundary** / **Border animation** - Draw the GE border, and whether a takeover raises the wall or fades a flat line.
 - **Tint GE on minimap** / **Minimap opacity** - Shade the GE on the minimap in the owner's color, and how strong.
 - **Show GE on world map** - Outline the GE on the world map in the owner's color with the clan name. Works anywhere.
+- **Show Pre-Claims** - Fill the unwalkable GE pockets in the owner's color (white when unclaimed). Cosmetic; never counted.
+- **Snail trail** - Leave a fading clan-colored trail behind you. Does not affect claims or TPH.
+
+### Takeover
+
+- **Show GE boundary** / **Border animation** - Draw the GE border, and whether a takeover raises the wall or fades a flat line.
+- **Tile walls** - Toggle all raised wall effects: tile captures, takeovers, and the snail trail.
 - **Announce takeovers** - Post a clan-tab message when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud.
-- **Tile walls** - Toggle all raised wall effects, including tile captures, takeovers, and the snail trail.
 
-![Configuration](images/config.png)
+### Clan
 
-- **Custom clan color** / **Your clan color** - Recolor your own clan's tiles. Local only.
 - **Clan chat commands** - Turn `!defend` / `!invade` in clan chat into rally calls.
-- **Use sync server** - Sync with other clans so the war is live (on by default). Off for local-only.
+- **Custom clan colors** - Apply your local clan color list (below). Off = every clan uses its auto color.
+- **Clan color list** - Per-clan colors as `ClanName=RRGGBB`, comma-separated. Set them by clicking bars in the side panel; copy and paste to share.
+
+### Network
+
+- **Use sync server** - Sync with other clans so the war is live (on by default). Off for local-only, nothing sent.
+
+### Extras
+
 - **Reset countdown** - Show the countdown and clan warnings before the daily reset.
 - **Tiles/hour tracker** - Show the tiles-claimed and TPH overlay. Shift + right-click to reset.
+- **Colorblind** - Daltonize all clan colors for easier separation: protanopia, deuteranopia, or tritanopia.
 
 ## Notes
 

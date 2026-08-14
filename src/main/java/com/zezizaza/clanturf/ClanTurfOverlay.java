@@ -106,6 +106,8 @@ class ClanTurfOverlay extends Overlay
 			new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
 	/** Barrier tint before any clan owns tiles. */
 	private static final Color BOUNDARY_DEFAULT = Color.WHITE;
+	/** Border-map tag for filler when the GE is unclaimed, so white pockets merge with each other. */
+	private static final String FILLER_UNCLAIMED = "__ct_unclaimed__";
 	private static final int SPARKLE_BRIGHT = 150;   // max brightness added at a tile's peak
 
 	private final Client client;
@@ -211,14 +213,50 @@ class ClanTurfOverlay extends Overlay
 		// Snail trail: the fading slime the model leaves as it moves, under the solid claims below.
 		drawTrail(graphics, wv, playerLocation, dnow);
 
+		final int plane = wv.getPlane();
+		final int alpha = config.fillOpacity();
+		final boolean outline = config.drawOutline();
+
+		// Who owns each claimed tile, in canonical world coords, so we can test neighbours cheaply.
+		Map<Long, String> owner = new HashMap<>(Math.max(16, claims.size() * 2));
+		for (ClanTurfPoint p : claims)
+		{
+			if (p.getZ() != plane)
+			{
+				continue;
+			}
+			WorldPoint w = WorldPoint.fromRegion(p.getRegionId(), p.getRegionX(), p.getRegionY(), p.getZ());
+			owner.put(key(w.getX(), w.getY()), p.getClanName());
+		}
+
+		// Filler pockets are always shown near the GE in the current GE owner's color (white when
+		// unclaimed), fading old -> new on takeover like the boundary. The border map is the claims plus
+		// the filler - all tagged with the GE owner (or an unclaimed sentinel) - so the owner's own tiles
+		// merge with the filler while a rival's tiles seam against it with a double line, and that flips
+		// automatically when the GE changes hands. Render-only: filler is never claimed, counted, or synced.
+		String leader = plugin.getBoundaryLeader();
+		String fillerId = leader != null ? leader : FILLER_UNCLAIMED;
+		Map<Long, String> border = new HashMap<>(owner);
+		if (config.showPreClaims() && GrandExchangeArea.near(playerLocation, BOUNDARY_MARGIN))
+		{
+			for (WorldPoint f : GrandExchangeArea.filler())
+			{
+				border.putIfAbsent(key(f.getX(), f.getY()), fillerId);
+			}
+			drawFiller(graphics, wv, plane, playerLocation, border, fillerId, alpha, outline);
+		}
+
 		if (claims.isEmpty())
 		{
 			return null;
 		}
 
-		final int plane = wv.getPlane();
-		final int alpha = config.fillOpacity();
-		final boolean outline = config.drawOutline();
+		if (!owner.isEmpty())
+		{
+			lastOwners.clear();
+			lastOwners.putAll(owner); // remember the latest tiles so a wipe can dissolve them
+		}
+		appearing.keySet().retainAll(owner.keySet()); // forget tiles that are gone
 
 		final long now = System.currentTimeMillis();
 
@@ -244,25 +282,6 @@ class ClanTurfOverlay extends Overlay
 		// of the player, rising/falling with that tile's own shimmer pulse. Radius-bounded so it
 		// stays a local flourish instead of hundreds of walls across the whole GE.
 		boolean doTileWalls = inAnim && config.tileWalls() && config.tileWallHeight() > 0;
-
-		// Who owns each tile, in canonical world coords, so we can test neighbours cheaply. Also
-		// stamp when each tile first appeared (or changed clan) so it can fade in.
-		Map<Long, String> owner = new HashMap<>(claims.size() * 2);
-		for (ClanTurfPoint p : claims)
-		{
-			if (p.getZ() != plane)
-			{
-				continue;
-			}
-			WorldPoint w = WorldPoint.fromRegion(p.getRegionId(), p.getRegionX(), p.getRegionY(), p.getZ());
-			owner.put(key(w.getX(), w.getY()), p.getClanName());
-		}
-		if (!owner.isEmpty())
-		{
-			lastOwners.clear();
-			lastOwners.putAll(owner); // remember the latest tiles so a wipe can dissolve them
-		}
-		appearing.keySet().retainAll(owner.keySet()); // forget tiles that are gone
 
 		for (ClanTurfPoint point : claims)
 		{
@@ -388,17 +407,94 @@ class ClanTurfOverlay extends Overlay
 					double ccx = (xp[0] + xp[1] + xp[2] + xp[3]) / 4.0;
 					double ccy = (yp[0] + yp[1] + yp[2] + yp[3]) / 4.0;
 
+					// `border` = claims + filler, so a real tile merges with same-owner filler and
+					// double-lines against it when a rival holds the GE.
 					drawTileOutline(graphics, edge,
-							edgeType(owner.get(key(sx, sy - 1)), clan, GrandExchangeArea.contains(sx, sy - 1)),
-							edgeType(owner.get(key(sx + 1, sy)), clan, GrandExchangeArea.contains(sx + 1, sy)),
-							edgeType(owner.get(key(sx, sy + 1)), clan, GrandExchangeArea.contains(sx, sy + 1)),
-							edgeType(owner.get(key(sx - 1, sy)), clan, GrandExchangeArea.contains(sx - 1, sy)),
+							edgeType(border.get(key(sx, sy - 1)), clan, GrandExchangeArea.contains(sx, sy - 1)),
+							edgeType(border.get(key(sx + 1, sy)), clan, GrandExchangeArea.contains(sx + 1, sy)),
+							edgeType(border.get(key(sx, sy + 1)), clan, GrandExchangeArea.contains(sx, sy + 1)),
+							edgeType(border.get(key(sx - 1, sy)), clan, GrandExchangeArea.contains(sx - 1, sy)),
 							xp, yp, ccx, ccy);
 				}
 			}
 		}
 
 		return null;
+	}
+
+	/**
+	 * The boundary's current color: the GE owner's clan color, white ({@link #BOUNDARY_DEFAULT}) when
+	 * unclaimed, blended old -> new mid-takeover exactly like the boundary line - so the filler always
+	 * matches the boundary's color and transition.
+	 */
+	private Color boundaryColorNow()
+	{
+		String leader = plugin.getBoundaryLeader();
+		Color rest = leader == null ? BOUNDARY_DEFAULT : ClanTurfColors.forClan(leader);
+		long animStartMs = plugin.getAnimStartMs();
+		Color animFrom = plugin.getAnimFrom();
+		Color animTo = plugin.getAnimTo();
+		long elapsed = System.currentTimeMillis() - animStartMs;
+		if (animStartMs <= 0 || animFrom == null || animTo == null || elapsed >= animTotalMs())
+		{
+			return rest;
+		}
+		return lerp(animFrom, animTo, clamp01(ClanTurfAnim.colorMix(config, elapsed)));
+	}
+
+	/**
+	 * Draws the filler pockets, all in the GE owner's current color (white when unclaimed), using the
+	 * same fill + border logic real tiles use against the merged {@code border} map. Because every
+	 * filler tile carries {@code fillerId} (the GE owner), the owner's own claimed tiles merge with it,
+	 * a rival's tiles double-line against it, and both flip automatically when the GE changes hands.
+	 * No fade or wall - filler is structural, so it sits settled under the live, animated tiles.
+	 */
+	private void drawFiller(Graphics2D graphics, WorldView wv, int plane, WorldPoint playerLocation,
+			Map<Long, String> border, String fillerId, int alpha, boolean outline)
+	{
+		Color base = boundaryColorNow();
+		Color edge = brighten(base, 60, config.outlineOpacity());
+		for (WorldPoint tile : GrandExchangeArea.filler())
+		{
+			int sx = tile.getX();
+			int sy = tile.getY();
+			for (WorldPoint wp : WorldPoint.toLocalInstance(wv, tile))
+			{
+				if (wp.getPlane() != plane
+						|| (playerLocation != null && wp.distanceTo(playerLocation) >= MAX_DRAW_DISTANCE))
+				{
+					continue;
+				}
+				LocalPoint lp = LocalPoint.fromWorld(wv, wp);
+				if (lp == null)
+				{
+					continue;
+				}
+				Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+				if (poly == null || poly.npoints < 4)
+				{
+					continue;
+				}
+				if (alpha > 0)
+				{
+					graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha));
+					graphics.fill(poly);
+				}
+				if (outline)
+				{
+					int[] xp = poly.xpoints;
+					int[] yp = poly.ypoints;
+					double ccx = (xp[0] + xp[1] + xp[2] + xp[3]) / 4.0;
+					double ccy = (yp[0] + yp[1] + yp[2] + yp[3]) / 4.0;
+					drawTileOutline(graphics, edge,
+							edgeType(border.get(key(sx, sy - 1)), fillerId, GrandExchangeArea.contains(sx, sy - 1)),
+							edgeType(border.get(key(sx + 1, sy)), fillerId, GrandExchangeArea.contains(sx + 1, sy)),
+							edgeType(border.get(key(sx, sy + 1)), fillerId, GrandExchangeArea.contains(sx, sy + 1)),
+							edgeType(border.get(key(sx - 1, sy)), fillerId, GrandExchangeArea.contains(sx - 1, sy)),
+							xp, yp, ccx, ccy);
+				}
+			}
+		}
 	}
 
 	/**

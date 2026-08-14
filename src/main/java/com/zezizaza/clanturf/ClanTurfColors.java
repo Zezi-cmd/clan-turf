@@ -44,8 +44,17 @@ final class ClanTurfColors
 	 * thread, read from the render thread and the Swing EDT, hence concurrent. */
 	private static final Map<String, Color> OVERRIDES = new ConcurrentHashMap<>();
 
+	/** Active color-blindness adjustment, applied to every color {@link #forClan} returns. */
+	private static volatile ColorblindMode colorblind = ColorblindMode.NONE;
+
 	private ClanTurfColors()
 	{
+	}
+
+	/** Set the color-blindness mode (from config); NONE leaves colors untouched. */
+	static void setColorblindMode(ColorblindMode mode)
+	{
+		colorblind = mode == null ? ColorblindMode.NONE : mode;
 	}
 
 	/** Pin a clan to a fixed color (local override). */
@@ -72,6 +81,12 @@ final class ClanTurfColors
 	 */
 	static Color forClan(String clanName)
 	{
+		return adjust(baseColor(clanName));
+	}
+
+	/** The clan's color before any color-blindness adjustment: a local override, else a stable hash. */
+	private static Color baseColor(String clanName)
+	{
 		if (clanName == null || clanName.isEmpty())
 		{
 			return Color.GRAY;
@@ -92,5 +107,63 @@ final class ClanTurfColors
 		h ^= (h >>> 16);
 		float hue = Math.floorMod(h, 360) / 360f;
 		return Color.getHSBColor(hue, 0.65f, 0.90f);
+	}
+
+	/**
+	 * Daltonize a color for the active color-blindness mode: simulate what that eye sees, then push the
+	 * lost difference back onto the channels it can still tell apart, so confusable clans separate more.
+	 * NONE returns the color unchanged. Standard LMS-space method (Fidaner).
+	 */
+	private static Color adjust(Color c)
+	{
+		ColorblindMode mode = colorblind;
+		if (mode == ColorblindMode.NONE)
+		{
+			return c;
+		}
+		double r = c.getRed();
+		double g = c.getGreen();
+		double b = c.getBlue();
+
+		// RGB -> LMS cone response.
+		double l = 17.8824 * r + 43.5161 * g + 4.11935 * b;
+		double m = 3.45565 * r + 27.1554 * g + 3.86714 * b;
+		double s = 0.0299566 * r + 0.184309 * g + 1.46709 * b;
+
+		// Simulate the deficiency in LMS (drop the missing cone).
+		double ls = l;
+		double ms = m;
+		double ss = s;
+		switch (mode)
+		{
+			case PROTANOPIA:
+				ls = 2.02344 * m - 2.52581 * s;
+				break;
+			case DEUTERANOPIA:
+				ms = 0.494207 * l + 1.24827 * s;
+				break;
+			case TRITANOPIA:
+			default:
+				ss = -0.395913 * l + 0.801109 * m;
+				break;
+		}
+
+		// LMS -> RGB (what the color-blind eye perceives).
+		double sr = 0.0809444479 * ls - 0.130504409 * ms + 0.116721066 * ss;
+		double sg = -0.0102485335 * ls + 0.0540193266 * ms - 0.113614708 * ss;
+		double sb = -0.000365296938 * ls - 0.00412161469 * ms + 0.693511405 * ss;
+
+		// Redistribute the error (original - perceived) onto the channels still distinguishable.
+		double dr = r - sr;
+		double dg = g - sg;
+		double db = b - sb;
+		double ng = 0.7 * dr + dg;
+		double nb = 0.7 * dr + db;
+		return new Color(clamp(r), clamp(g + ng), clamp(b + nb));
+	}
+
+	private static int clamp(double v)
+	{
+		return (int) Math.max(0, Math.min(255, Math.round(v)));
 	}
 }
