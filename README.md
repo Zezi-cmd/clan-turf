@@ -38,6 +38,10 @@ A running all-time counter tracks every tile claimed or stolen across every clan
 
 ![Community Claims](images/comclaim.png)
 
+## Practice offline
+
+Offline mode lets you experiment with Clan Turf without connecting to the sync server. Only your local claims are shown and nothing is sent. **Clear my tiles** is available offline to wipe the current world's local claims.
+
 ## Rally your clan in chat
 
 Type `!defend 307` or `!invade 420` in clan chat (`!def` and `!inv` also work) to send a formatted rally call in the target clan's color. Commands are validated against the live board so only real targets are announced.
@@ -51,10 +55,6 @@ The GE is tinted on your minimap in the current owner's color. On the world map,
 ## Daily reset
 
 All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give you time to finish a battle, while the reset dissolves tiles in a staggered fade.
-
-## Practice offline
-
-Offline mode lets you experiment with Clan Turf without connecting to the sync server. Only your local claims are shown and nothing is sent. **Clear my tiles** is available offline to wipe the current world's local claims.
 
 ## Tiles per hour
 
