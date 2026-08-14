@@ -173,6 +173,20 @@ public interface ClanTurfConfig extends Config
 		return 100;
 	}
 
+	@ConfigItem(
+			keyName = "worldMap",
+			section = appearanceSection,
+			name = "Show GE on world map",
+			description = "Draw the Grand Exchange on the world map (the globe icon) in the current owner "
+					+ "clan's color, with the clan's name across it. Works anywhere - you don't have to be "
+					+ "at the GE to see who holds it on your world.",
+			position = 7
+	)
+	default boolean worldMap()
+	{
+		return true;
+	}
+
 	// ------------------------------------------------------------------ takeover
 
 	@ConfigItem(
@@ -481,6 +495,48 @@ public interface ClanTurfConfig extends Config
 	default int takeoverSoundDelayMs()
 	{
 		return 0;
+	}
+
+	// World map clan-name gleam - tuned during development, now baked in.
+
+	@ConfigItem(keyName = "gleamSpeedMs", name = "Name gleam: speed (ms)", description = "Baked.",
+			position = 124, hidden = true)
+	@Range(min = 100, max = 5000)
+	default int gleamSpeedMs()
+	{
+		return 900;
+	}
+
+	@ConfigItem(keyName = "gleamPauseMs", name = "Name gleam: pause (ms)", description = "Baked.",
+			position = 125, hidden = true)
+	@Range(min = 0, max = 10000)
+	default int gleamPauseMs()
+	{
+		return 4000;
+	}
+
+	@ConfigItem(keyName = "gleamWidthPct", name = "Name gleam: width", description = "Baked.",
+			position = 126, hidden = true)
+	@Range(min = 5, max = 200)
+	default int gleamWidthPct()
+	{
+		return 170;
+	}
+
+	@ConfigItem(keyName = "gleamFeatherPct", name = "Name gleam: feather", description = "Baked.",
+			position = 127, hidden = true)
+	@Range(min = 0, max = 49)
+	default int gleamFeatherPct()
+	{
+		return 40;
+	}
+
+	@ConfigItem(keyName = "gleamOpacity", name = "Name gleam: opacity", description = "Baked.",
+			position = 128, hidden = true)
+	@Range(min = 0, max = 255)
+	default int gleamOpacity()
+	{
+		return 215;
 	}
 
 	@ConfigItem(

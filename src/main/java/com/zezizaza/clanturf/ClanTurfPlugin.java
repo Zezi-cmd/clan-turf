@@ -93,6 +93,7 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ClanTurfMinimapOverlay minimapOverlay;
 	@Inject private ClanTurfResetOverlay resetOverlay;
 	@Inject private ClanTurfTrackerOverlay trackerOverlay;
+	@Inject private ClanTurfWorldMapOverlay worldMapOverlay;
 	@Inject private AudioPlayer audioPlayer;
 
 	// The seam pays off here: both stores implement ClanTurfStore, and startUp picks one.
@@ -228,6 +229,7 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.add(minimapOverlay);
 		overlayManager.add(resetOverlay);
 		overlayManager.add(trackerOverlay);
+		overlayManager.add(worldMapOverlay);
 
 		selectStore();
 
@@ -259,6 +261,7 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.remove(minimapOverlay);
 		overlayManager.remove(resetOverlay);
 		overlayManager.remove(trackerOverlay);
+		overlayManager.remove(worldMapOverlay);
 		clientToolbar.removeNavigation(navButton);
 		if (store != null)
 		{
@@ -958,6 +961,21 @@ public class ClanTurfPlugin extends Plugin
 						+ clanCol + "World " + world + RESET + WHITE + "!" + RESET;
 		event.getMessageNode().setValue(call);
 		client.refreshChat();
+	}
+
+	/**
+	 * The current world's GE owner for the world-map overlay, read from the always-on battles board so
+	 * it works anywhere (not only at the GE). Falls back to the committed leader when we're at the GE
+	 * and the battles feed hasn't caught up yet.
+	 */
+	String getWorldMapOwner()
+	{
+		ClanTurfBattle b = findBattle(client.getWorld());
+		if (b != null && b.getOwner() != null)
+		{
+			return b.getOwner();
+		}
+		return committedLeader;
 	}
 
 	/** The battle for a given world from the shared board, or null if it isn't contested. */

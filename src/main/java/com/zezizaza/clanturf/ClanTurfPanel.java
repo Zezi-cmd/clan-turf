@@ -95,6 +95,11 @@ class ClanTurfPanel extends PluginPanel
 	private long revealHoldUntil;   // hold the offline content until online data arrives, up to this time
 	private final Map<FadePanel, Long> reveals = new LinkedHashMap<>();
 	private Timer revealTimer;
+
+	// The last Active-battles content we actually rendered. The plugin refreshes the panel every few
+	// ticks; without this guard updateBattles() would tear the list down and rebuild it every time,
+	// flashing the section. We only rebuild when this signature changes.
+	private String lastBattlesSig;
 	private static final long REVEAL_FADE_MS = 160;       // per-element fade-in length
 	private static final long REVEAL_ROW_STAGGER = 55;    // gap between battle rows in the cascade
 	private static final long REVEAL_BATTLES_DELAY = 120; // battles start just after the bars
@@ -192,11 +197,17 @@ class ClanTurfPanel extends PluginPanel
 		globalCount.setFont(FontManager.getRunescapeBoldFont().deriveFont(22f));
 		globalCount.setForeground(new Color(0xEB, 0xC7, 0x33)); // celebratory amber
 		globalCount.setAlignmentX(Component.LEFT_ALIGNMENT);
+		// Opaque against the panel background so the count-up timer's rapid text changes clear and
+		// repaint in place, instead of ghosting old digits and forcing a repaint of the whole section.
+		globalCount.setOpaque(true);
+		globalCount.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
 		globalSub.setFont(FontManager.getRunescapeSmallFont());
 		globalSub.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		globalSub.setAlignmentX(Component.LEFT_ALIGNMENT);
 		globalSub.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+		globalSub.setOpaque(true); // same, so it repaints cleanly if a count change relays out the box
+		globalSub.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		globalSub.setText("<html><body style='width:170px'>Every tile claimed or stolen by everyone "
 				+ "playing Clan Turf since launch. THANK YOU for downloading my plugin and joining the "
 				+ "turf war! Keep pushing that number higher, maybe something interesting will happen"
@@ -600,6 +611,14 @@ class ClanTurfPanel extends PluginPanel
 			{
 				return; // coming online: hold the offline battles until the server's load in
 			}
+			// Skip the teardown/rebuild when nothing changed, so the list doesn't flash every refresh.
+			// A pending reveal always rebuilds (it needs fresh rows to cascade in).
+			String sig = battlesSignature(list, myClan, currentWorld);
+			if (!revealBattlesPending && sig.equals(lastBattlesSig))
+			{
+				return;
+			}
+			lastBattlesSig = sig;
 			battlesBox.removeAll();
 			if (list.isEmpty())
 			{
@@ -634,6 +653,24 @@ class ClanTurfPanel extends PluginPanel
 			battlesBox.revalidate();
 			battlesBox.repaint();
 		});
+	}
+
+	/**
+	 * A stable fingerprint of the Active-battles content: everything that changes what the rows look
+	 * like (the world you're on and your clan drive the current-world pin and Defend/Invade labels, so
+	 * they're included). If two calls produce the same string, the rendered list would be identical.
+	 */
+	private static String battlesSignature(List<ClanTurfBattle> list, String myClan, int currentWorld)
+	{
+		StringBuilder sb = new StringBuilder();
+		sb.append(currentWorld).append('|').append(myClan == null ? "" : myClan).append('#');
+		for (ClanTurfBattle b : list)
+		{
+			sb.append(b.getWorld()).append(',').append(b.getOwner()).append(',')
+					.append(b.getOwnerTiles()).append(',').append(b.getTotalTiles()).append(',')
+					.append(b.getRunnerUp()).append(',').append(b.getRunnerUpTiles()).append(';');
+		}
+		return sb.toString();
 	}
 
 	/**

@@ -167,6 +167,12 @@ final class GrandExchangeArea
 		return BOUNDARY;
 	}
 
+	/** Center of the area's bounding box, on the ground floor - used to place the world-map label. */
+	static WorldPoint center()
+	{
+		return new WorldPoint((MIN_X + MAX_X) / 2, (MIN_Y + MAX_Y) / 2, PLANE);
+	}
+
 	/**
 	 * @return true if the tile is within {@code margin} tiles of the area's bounding box on the
 	 *         ground floor. Used to decide when the client should be connected to the server.
