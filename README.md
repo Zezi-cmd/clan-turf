@@ -24,6 +24,8 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 Parts of the Grand Exchange aren't walkable - the central building, the stalls, the staircases. Rather than leave holes in a clan's territory, Clan Turf fills those pockets in the current owner's color (white while the GE is unclaimed) so turf reads as one solid block, and they recolor on takeover right along with the boundary. Purely cosmetic: these tiles are never claimable and never counted. Turn it off with **Show Pre-Claims**.
 
+![Pre-claims](images/preclaims.png)
+
 ## Live scoreboard
 
 The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds.
@@ -35,6 +37,8 @@ The side panel ranks every clan on your world by tiles held, with each clan's sh
 Every clan is auto-assigned its own color, but you can override any of them. Hover a bar in the side panel to highlight it and click to open the color wheel - pick a color for your own clan or a rival's. Your picks are saved to a local color list you can copy and paste to share a whole palette with clanmates. It's all local, so everyone else still sees their own colors.
 
 Colorblind? A **Colorblind** mode in the settings adjusts every clan color, auto and custom alike, to be easier to tell apart - protanopia, deuteranopia, or tritanopia.
+
+![Colorblind](images/colorblind.png)
 
 ## Active battles
 
@@ -101,11 +105,15 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 - **Snail trail** - Leave a fading clan-colored trail behind you. Does not affect claims or TPH.
 - **Tile walls** - Toggle all raised wall effects: tile captures, takeovers, and the snail trail.
 
+![Appearance settings](images/configappearance.png)
+
 ### Takeover
 
 - **Border animation** - On a takeover, raise the boundary into a wall, or just fade it to the new color (flat).
 - **Announce takeovers** - Post a clan-tab message when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud.
+
+![Takeover settings](images/configtakeover.png)
 
 ### Clan
 
@@ -114,15 +122,21 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 - **Clan color list** - Per-clan colors for the live game as `ClanName=RRGGBB`, comma-separated. Set them by clicking bars in the side panel while online; copy and paste to share.
 - **Offline color list** - Same format, but for the offline sandbox only, so test-clan colors stay out of the shareable list.
 
+![Clan settings](images/configclan.png)
+
 ### Network
 
 - **Use sync server** - Sync with other clans so the war is live (on by default). Off for local-only, nothing sent.
+
+![Network settings](images/confignetwork.png)
 
 ### Extras
 
 - **Reset countdown** - Show the countdown and clan warnings before the daily reset.
 - **Tiles/hour tracker** - Show the tiles-claimed and TPH overlay. Shift + right-click to reset.
 - **Colorblind** - Daltonize all clan colors for easier separation: protanopia, deuteranopia, or tritanopia.
+
+![Extras settings](images/configextras.png)
 
 ## Notes
 
