@@ -69,7 +69,7 @@ class ClanTurfTrackerOverlay extends OverlayPanel
 	{
 		// Fade in near the GE and out when away (like the side panel), so the tracker only shows
 		// where the turf war is. Off entirely when the toggle is disabled.
-		boolean show = config.showTileTracker() && plugin.isNearGe();
+		boolean show = config.showTileTracker() && plugin.isNearGe() && !plugin.isSlugPainting();
 		alpha += ((show ? 1.0 : 0.0) - alpha) * FADE_EASE;
 		if (alpha < 0.02)
 		{

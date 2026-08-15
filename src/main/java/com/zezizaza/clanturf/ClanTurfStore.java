@@ -61,6 +61,14 @@ interface ClanTurfStore
 	void clearClaims(int world);
 
 	/**
+	 * Remove a single tile's claim, if present (used by the offline eraser). Default no-op: only the
+	 * local store implements it, since erasing is an offline-only sandbox tool.
+	 */
+	default void removeClaim(ClanTurfPoint point)
+	{
+	}
+
+	/**
 	 * Register a callback fired whenever the claim set changes (local write today; also
 	 * remote writes once a backend exists) so the overlay/panel can repaint. The local
 	 * store only ever calls this from its own {@link #putClaim}.

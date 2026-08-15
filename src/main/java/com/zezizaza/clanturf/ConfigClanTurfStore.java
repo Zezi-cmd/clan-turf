@@ -104,6 +104,20 @@ class ConfigClanTurfStore implements ClanTurfStore
 	}
 
 	@Override
+	public void removeClaim(ClanTurfPoint point)
+	{
+		List<ClanTurfPoint> points = new ArrayList<>(read(point.getWorld(), point.getRegionId()));
+		boolean removed = points.removeIf(p -> p.getRegionX() == point.getRegionX()
+				&& p.getRegionY() == point.getRegionY()
+				&& p.getZ() == point.getZ());
+		if (removed)
+		{
+			write(point.getWorld(), point.getRegionId(), points);
+			changeListener.run();
+		}
+	}
+
+	@Override
 	public void clearClaims(int world)
 	{
 		for (int regionId : GrandExchangeArea.regionIds())

@@ -212,6 +212,8 @@ class ClanTurfOverlay extends Overlay
 
 		// Snail trail: the fading slime the model leaves as it moves, under the solid claims below.
 		drawTrail(graphics, wv, playerLocation, dnow);
+		// Eraser: a white flash on tiles just wiped, fading to nothing.
+		drawEraseFlash(graphics, wv, playerLocation, dnow);
 
 		final int plane = wv.getPlane();
 		final int alpha = config.fillOpacity();
@@ -731,12 +733,11 @@ class ClanTurfOverlay extends Overlay
 		{
 			return;
 		}
-		String clan = plugin.getTrailClan();
-		if (clan == null)
+		Color base = plugin.getTrailColor();
+		if (base == null)
 		{
 			return;
 		}
-		Color base = ClanTurfColors.forClan(clan);
 		long fadeMs = plugin.getTrailFadeMs();
 		int baseAlpha = config.fillOpacity();
 		int plane = wv.getPlane();
@@ -805,6 +806,60 @@ class ClanTurfOverlay extends Overlay
 						}
 					}
 				}
+			}
+		}
+	}
+
+	/**
+	 * Draws the offline eraser's white flash: each just-erased tile flashes white and fades to nothing
+	 * over the plugin's flash window, so wiping a colored tile reads as a quick "reclaim to neutral".
+	 */
+	private void drawEraseFlash(Graphics2D graphics, WorldView wv, WorldPoint playerLocation, long now)
+	{
+		Map<WorldPoint, Long> flash = plugin.getEraseFlash();
+		if (flash.isEmpty())
+		{
+			return;
+		}
+		long ms = plugin.getEraseFlashMs();
+		int plane = wv.getPlane();
+		for (Map.Entry<WorldPoint, Long> e : flash.entrySet())
+		{
+			long age = now - e.getValue();
+			if (age < 0 || age >= ms)
+			{
+				continue;
+			}
+			double f = 1.0 - age / (double) ms;
+			WorldPoint stored = e.getKey();
+			if (stored.getPlane() != plane)
+			{
+				continue;
+			}
+			for (WorldPoint wp : WorldPoint.toLocalInstance(wv, stored))
+			{
+				if (wp.getPlane() != plane)
+				{
+					continue;
+				}
+				double dist = playerLocation == null ? 0 : wp.distanceTo(playerLocation);
+				if (dist >= MAX_DRAW_DISTANCE)
+				{
+					continue;
+				}
+				LocalPoint lp = LocalPoint.fromWorld(wv, wp);
+				if (lp == null)
+				{
+					continue;
+				}
+				Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+				if (poly == null || poly.npoints < 4)
+				{
+					continue;
+				}
+				int a = (int) Math.round(200 * fadeFactor(dist) * f);
+				graphics.setColor(new Color(255, 255, 255, a));
+				graphics.fill(poly);
 			}
 		}
 	}

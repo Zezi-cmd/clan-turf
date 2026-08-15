@@ -31,6 +31,7 @@ import java.awt.image.BufferedImage;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -125,6 +126,16 @@ public class ClanTurfPlugin extends Plugin
 	/** Last tile stamped into the trail, so each tile is stamped once on entry (not re-stamped every
 	 * frame while you stand on it, which would pin it at full instead of letting it fade out). */
 	private WorldPoint lastTrailTile;
+	/** Offline sandbox: the clan your steps paint as, or null to paint as your real clan. */
+	private String selectedPaintClan;
+	/** Last real clan we pushed to the panel's paint-as list, so we only rebuild it when it changes. */
+	private String lastPaintPushClan = "__none__";
+	/** Offline eraser: tiles just erased, world tile -&gt; timestamp, for the overlay's white flash. */
+	private final Map<WorldPoint, Long> eraseFlash = new HashMap<>();
+	private static final long ERASE_FLASH_MS = 500L;
+	/** The model tile last game tick, so slug-off Surrender only erases once you MOVE onto a new one
+	 * (flipping Surrender on doesn't wipe the tile you're standing on). */
+	private WorldPoint lastEraseTile;
 
 	/** When we most recently had no clan channel, so the panel only shows the "join a clan" hint once
 	 * the channel has had time to load (it arrives seconds after login and drops on a hop). Otherwise
@@ -132,7 +143,6 @@ public class ClanTurfPlugin extends Plugin
 	private long clanlessSinceMs;
 	private static final long CLAN_GRACE_MS = 6000L;
 
-	/** The clan name we currently have a local color override registered for (custom clan color). */
 	/** Clans (lower-case) we've locally recolored from the color list, so we can clear them on a change. */
 	private final Set<String> whitelistApplied = new HashSet<>();
 
@@ -223,7 +233,10 @@ public class ClanTurfPlugin extends Plugin
 	protected void startUp()
 	{
 		panel = new ClanTurfPanel(this::invade, this::clearOfflineTiles, this::setUseServer,
-				colorPickerManager, this::onClanColorChosen);
+				colorPickerManager, this::onClanColorChosen, this::setSlug,
+				this::addSandboxClan, this::selectPaintClan, this::removeSandboxClan, this::setEraser);
+		panel.setSlug(config.fullSlug());
+		panel.setEraser(config.eraser());
 		navButton = NavigationButton.builder()
 				.tooltip("Clan Turf")
 				.icon(buildIcon())
@@ -342,10 +355,12 @@ public class ClanTurfPlugin extends Plugin
 			selectStore();
 			leaderInit = false;
 			committedLeader = null;
+			applyWhitelist(); // switching online/offline changes whether the offline color list applies
 			refreshClaims();
 		}
-		// Recolor live when the custom-color toggle or the clan color list changes.
-		else if ("customClanColor".equals(key) || "clanColorWhitelist".equals(key))
+		// Recolor live when the custom-color toggle or either color list changes.
+		else if ("customClanColor".equals(key) || "clanColorWhitelist".equals(key)
+				|| "offlineClanColors".equals(key))
 		{
 			applyWhitelist();
 			refreshClaims();
@@ -414,6 +429,19 @@ public class ClanTurfPlugin extends Plugin
 			return;
 		}
 
+		// Keep the paint-as roster's "your clan" entry current as the clan channel loads or changes, and
+		// remember the name so it shows instantly next login instead of waiting for the channel.
+		String realClanNow = effectiveClanName();
+		if (realClanNow != null && !realClanNow.equals(config.lastClan()))
+		{
+			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lastClan", realClanNow);
+		}
+		if (!java.util.Objects.equals(realClanNow, lastPaintPushClan))
+		{
+			lastPaintPushClan = realClanNow;
+			pushPaintClans();
+		}
+
 		// Track how long we've had no clan channel, so the panel doesn't call a clan member "clan-less"
 		// during the seconds it takes the channel to load after login (or reload after a hop).
 		if (effectiveClanName() != null)
@@ -434,6 +462,7 @@ public class ClanTurfPlugin extends Plugin
 			announcedOwner = null; // re-baseline the global takeover detector on the new world
 			animStartMs = 0;    // don't let a takeover animation bleed from the old world onto the new
 			trail.clear();      // snail-trail tiles are per-world coords; don't drag them across a hop
+			eraseFlash.clear();
 			lastTrailTile = null;
 			refreshClaims();
 		}
@@ -489,7 +518,27 @@ public class ClanTurfPlugin extends Plugin
 		// Claim the tile you're standing on: the true/server tile, once per tick. Running skips every
 		// other tile - correct, that's where you actually land. Snail-trail mode adds a purely visual
 		// trail over the skipped tiles per frame in onClientTick; it never changes what gets claimed.
-		tryClaim(local.getWorldLocation(), world);
+		// Slug off = act once per tick, skipping the in-between tiles when you run. Claiming uses the true
+		// tile (where you actually land). Surrender erases the tile under the character MODEL (tracks your
+		// feet, not the true tile out front) and only once you MOVE onto a new tile, so flipping Surrender
+		// on doesn't wipe the tile you're standing on. Slug on -> onClientTick drives every crossed tile.
+		LocalPoint mlp = local.getLocalLocation();
+		WorldPoint modelTile = mlp == null ? null : WorldPoint.fromLocalInstance(client, mlp);
+		if (!isSlugPainting())
+		{
+			if (isErasing())
+			{
+				if (modelTile != null && !modelTile.equals(lastEraseTile))
+				{
+					eraseTile(modelTile);
+				}
+			}
+			else
+			{
+				tryClaim(local.getWorldLocation(), world);
+			}
+		}
+		lastEraseTile = modelTile; // tracked every tick, so Surrender starts fresh from where you stand
 	}
 
 	@Subscribe
@@ -500,7 +549,12 @@ public class ClanTurfPlugin extends Plugin
 		// skip while running. Visual only: it never claims or counts a tile (that stays true-tile on the
 		// game tick), so it can't become a faster way to grab turf.
 		pruneTrail();
-		if (!config.snailTrail() || !nearGeNow || effectiveClanName() == null)
+		boolean slug = isSlugPainting();
+		boolean surrender = isErasing();
+		// Trail obeys the Snail trail setting either way: white while surrendering, clan-colored otherwise
+		// (needs a clan for a color). Off = no trail, even during surrender.
+		boolean wantTrail = config.snailTrail() && (surrender || paintClan() != null);
+		if ((!wantTrail && !slug) || !nearGeNow)
 		{
 			return;
 		}
@@ -523,7 +577,63 @@ public class ClanTurfPlugin extends Plugin
 			lastTrailTile = wp;
 			if (GrandExchangeArea.contains(wp))
 			{
-				trail.put(wp, System.currentTimeMillis());
+				if (wantTrail)
+				{
+					trail.put(wp, System.currentTimeMillis());
+				}
+				// Slug scope (offline sandbox): the action hits every crossed tile, not just the one you
+				// land on. Surrender erases, otherwise claim. Offline-gated, so it never touches live play.
+				if (slug)
+				{
+					if (surrender)
+					{
+						eraseTile(wp);
+					}
+					else
+					{
+						tryClaim(wp, client.getWorld());
+					}
+				}
+			}
+		}
+	}
+
+	/** Full slug paint mode: on only offline (local store) with the side-panel toggle set. */
+	boolean isSlugPainting()
+	{
+		return store == localStore && config.fullSlug();
+	}
+
+	/** Side-panel toggle for offline Full Slug - the scope switch: it makes both claiming and surrender
+	 * hit every tile you cross instead of just the one you land on. Persisted. */
+	void setSlug(boolean on)
+	{
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "fullSlug", on);
+	}
+
+	/** Offline Surrender mode: your steps erase instead of claim. On only offline with the toggle set. */
+	boolean isErasing()
+	{
+		return store == localStore && config.eraser();
+	}
+
+	/** Side-panel toggle for offline Surrender (erase instead of claim). Persisted. Composes with Slug. */
+	void setEraser(boolean on)
+	{
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "eraser", on);
+	}
+
+	/** Erase the claim on a crossed tile, if any, and flash it white. Offline eraser only. */
+	private void eraseTile(WorldPoint wp)
+	{
+		for (ClanTurfPoint c : visibleClaims)
+		{
+			if (c.getZ() == wp.getPlane() && c.getRegionId() == wp.getRegionID()
+					&& c.getRegionX() == wp.getRegionX() && c.getRegionY() == wp.getRegionY())
+			{
+				store.removeClaim(c);
+				eraseFlash.put(wp, System.currentTimeMillis());
+				return;
 			}
 		}
 	}
@@ -531,12 +641,13 @@ public class ClanTurfPlugin extends Plugin
 	/** Drop snail-trail tiles older than the fade window so the map stays small. */
 	private void pruneTrail()
 	{
+		long now = System.currentTimeMillis();
+		eraseFlash.values().removeIf(t -> t < now - ERASE_FLASH_MS);
 		if (trail.isEmpty())
 		{
 			return;
 		}
-		long cutoff = System.currentTimeMillis() - TRAIL_MS;
-		trail.values().removeIf(t -> t < cutoff);
+		trail.values().removeIf(t -> t < now - TRAIL_MS);
 	}
 
 	/**
@@ -556,8 +667,8 @@ public class ClanTurfPlugin extends Plugin
 			return;
 		}
 
-		// The clan is stamped at claim time (our own channel, or the testing override).
-		String clanName = effectiveClanName();
+		// The clan is stamped at claim time: your real clan online, or the selected sandbox clan offline.
+		String clanName = paintClan();
 		if (clanName == null)
 		{
 			// Can't claim yet - e.g. the clan channel is still loading for a few seconds right after a
@@ -594,11 +705,16 @@ public class ClanTurfPlugin extends Plugin
 		log.debug("Claimed {},{} plane {} for {} on world {}",
 				wp.getRegionX(), wp.getRegionY(), wp.getPlane(), clanName, world);
 
-		// Tiles/hour tracker: every claim counts (retakes included); the clock starts on the first.
-		sessionClaims++;
-		if (firstClaimMs == 0L)
+		// Tiles/hour tracker: count genuine gains only - a fresh or stolen tile, the same 'gain' rule the
+		// community counter uses - so dancing on your own turf doesn't inflate it. Full Slug is a drawing
+		// tool, not a run, so it never touches the numbers either (and the tracker is hidden while it's on).
+		if (gain && !isSlugPainting())
 		{
-			firstClaimMs = System.currentTimeMillis();
+			sessionClaims++;
+			if (firstClaimMs == 0L)
+			{
+				firstClaimMs = System.currentTimeMillis();
+			}
 		}
 	}
 
@@ -680,10 +796,124 @@ public class ClanTurfPlugin extends Plugin
 		return TRAIL_MS;
 	}
 
-	/** The clan whose color the snail trail draws in (the local player's), or null if not in one. */
-	String getTrailClan()
+	/** The snail-trail color: white while erasing (a neutral run), else the clan you're painting as; null
+	 * means no trail (no clan and not erasing). */
+	Color getTrailColor()
 	{
+		if (isErasing())
+		{
+			return Color.WHITE;
+		}
+		String clan = paintClan();
+		return clan == null ? null : ClanTurfColors.forClan(clan);
+	}
+
+	/** Tiles just erased, for the overlay's white flash, and how long that flash lasts. */
+	Map<WorldPoint, Long> getEraseFlash()
+	{
+		return eraseFlash;
+	}
+
+	long getEraseFlashMs()
+	{
+		return ERASE_FLASH_MS;
+	}
+
+	/**
+	 * The clan new claims are stamped for. Online it's always your real clan; offline it's the selected
+	 * sandbox clan (your real clan, or an added test clan) so you can paint a battle as different sides.
+	 */
+	private String paintClan()
+	{
+		if (store == localStore && selectedPaintClan != null)
+		{
+			return selectedPaintClan;
+		}
 		return effectiveClanName();
+	}
+
+	/** Parse the persisted offline sandbox clan list (comma-separated names). */
+	private List<String> sandboxClans()
+	{
+		List<String> out = new ArrayList<>();
+		for (String s : config.sandboxClans().split(","))
+		{
+			String n = s.trim();
+			if (!n.isEmpty())
+			{
+				out.add(n);
+			}
+		}
+		return out;
+	}
+
+	/** Add an offline test clan (deduped against the list and your real clan), then refresh the panel. */
+	void addSandboxClan(String name)
+	{
+		if (name == null)
+		{
+			return;
+		}
+		String n = name.trim();
+		String real = effectiveClanName();
+		if (n.isEmpty() || n.equalsIgnoreCase(real))
+		{
+			return;
+		}
+		List<String> clans = sandboxClans();
+		for (String c : clans)
+		{
+			if (c.equalsIgnoreCase(n))
+			{
+				return; // already present
+			}
+		}
+		clans.add(n);
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "sandboxClans", String.join(",", clans));
+		pushPaintClans();
+	}
+
+	/** Remove an offline test clan; if it was selected, fall back to painting as your real clan. */
+	void removeSandboxClan(String name)
+	{
+		List<String> clans = sandboxClans();
+		clans.removeIf(c -> c.equalsIgnoreCase(name));
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "sandboxClans", String.join(",", clans));
+		if (selectedPaintClan != null && selectedPaintClan.equalsIgnoreCase(name))
+		{
+			selectedPaintClan = null;
+		}
+		pushPaintClans();
+	}
+
+	/** Pick which clan your steps paint as. Selecting your real clan clears the override. */
+	void selectPaintClan(String name)
+	{
+		String real = effectiveClanName();
+		selectedPaintClan = (name == null || name.equalsIgnoreCase(real)) ? null : name;
+		pushPaintClans();
+	}
+
+	/** Push the current paint-as roster (your real clan first, then test clans) and selection to the panel. */
+	private void pushPaintClans()
+	{
+		String real = effectiveClanName();
+		if (real == null || real.isEmpty())
+		{
+			real = config.lastClan(); // show your clan right away, before the channel finishes loading
+		}
+		List<String> roster = new ArrayList<>();
+		if (real != null && !real.isEmpty())
+		{
+			roster.add(real);
+		}
+		roster.addAll(sandboxClans());
+		String selected = paintClan();
+		if (selected == null)
+		{
+			selected = real; // default: your clan highlighted
+		}
+		panel.setPaintClans(roster, real, selected);
 	}
 
 	/** Start the tile dissolve (daily reset or the Clear button); the overlay watches this stamp. */
@@ -824,7 +1054,19 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
-		for (Map.Entry<String, Color> e : parseWhitelist(config.clanColorWhitelist()).entrySet())
+		// The shareable online list always applies. Offline, the sandbox's own list layers on top, so
+		// test-clan colors never clutter the palette you'd copy and share.
+		applyColorList(config.clanColorWhitelist());
+		if (store == localStore)
+		{
+			applyColorList(config.offlineClanColors());
+		}
+	}
+
+	/** Register each ClanName=RRGGBB entry from a list as a local override, tracked for later removal. */
+	private void applyColorList(String raw)
+	{
+		for (Map.Entry<String, Color> e : parseWhitelist(raw).entrySet())
 		{
 			ClanTurfColors.setOverride(e.getKey(), e.getValue());
 			whitelistApplied.add(e.getKey().toLowerCase());
@@ -897,8 +1139,17 @@ public class ClanTurfPlugin extends Plugin
 			return;
 		}
 		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "customClanColor", true);
-		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "clanColorWhitelist",
-				upsertWhitelist(config.clanColorWhitelist(), clan, color));
+		// Offline, colors go to the sandbox's own list so test clans don't pollute the shareable one.
+		if (store == localStore)
+		{
+			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "offlineClanColors",
+					upsertWhitelist(config.offlineClanColors(), clan, color));
+		}
+		else
+		{
+			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "clanColorWhitelist",
+					upsertWhitelist(config.clanColorWhitelist(), clan, color));
+		}
 	}
 
 	/** Invade a battle's world: stage a quick-hop. Called from the panel on the Swing EDT. */

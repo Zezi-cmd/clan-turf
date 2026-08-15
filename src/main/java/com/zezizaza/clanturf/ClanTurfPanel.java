@@ -35,6 +35,7 @@ import java.awt.Font;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.Window;
 import java.awt.event.MouseAdapter;
@@ -55,6 +56,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -63,6 +65,7 @@ import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.LinkBrowser;
 
 /**
  * Sidebar scoreboard: a headline of who controls the GE, then a ranked leaderboard where each
@@ -77,18 +80,30 @@ class ClanTurfPanel extends PluginPanel
 	private final Leaderboard board = new Leaderboard(this::openColorPicker);
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
-	private final JButton clearOfflineBtn = new JButton("Clear my tiles");
+	private final JButton clearOfflineBtn = new JButton("Clear all tiles");
 	private final JButton serverToggleBtn = new JButton();
 	private final IntConsumer onInvade;
 	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
 	private final ColorPickerManager colorPickerManager;
 	private final BiConsumer<String, Color> onClanColorChosen; // (clan, chosen color) -> plugin persists
+	private final Consumer<Boolean> onSetSlug;   // offline Full Slug toggle -> plugin persists
+	private final Consumer<Boolean> onSetEraser; // offline Eraser toggle -> plugin persists
+	private final JButton eraserBtn = new JButton();
+	private boolean eraserOn;                     // mirrored Eraser state for the button label
+	private final Consumer<String> onAddClan;    // offline: add a test clan to paint as
+	private final Consumer<String> onSelectClan; // offline: paint as this clan
+	private final Consumer<String> onRemoveClan; // offline: remove a test clan
+	private final JButton slugBtn = new JButton();
+	private final FadePanel sandboxBox = new FadePanel(); // offline-only tools, fades in on going offline
+	private final JPanel paintClansBox = new JPanel();    // the paint-as roster rows
+	private boolean slugOn;                       // mirrored Full Slug state for the button label
 	private boolean serverOn = true;             // current mode, mirrored from the config
 
 	// "Community Claims": the all-time community counter, shown only in server mode, with a count-up
 	// animation each time the total ticks up.
 	private final FadePanel globalBox = new FadePanel();
 	private final JLabel globalHeader = new JLabel("Community Claims");
+	private final JLabel globalIntro = new JLabel(); // sits under the title, above the number
 	private final JLabel globalCount = new JLabel();
 	private final JLabel globalSub = new JLabel();
 	private long globalShown;   // the number currently on screen
@@ -128,12 +143,19 @@ class ClanTurfPanel extends PluginPanel
 	 * @param onClanColorChosen  (clan, chosen color) - the plugin persists it (own color vs color list)
 	 */
 	ClanTurfPanel(IntConsumer onInvade, Runnable onClearOffline, Consumer<Boolean> onSetServer,
-			ColorPickerManager colorPickerManager, BiConsumer<String, Color> onClanColorChosen)
+			ColorPickerManager colorPickerManager, BiConsumer<String, Color> onClanColorChosen,
+			Consumer<Boolean> onSetSlug, Consumer<String> onAddClan, Consumer<String> onSelectClan,
+			Consumer<String> onRemoveClan, Consumer<Boolean> onSetEraser)
 	{
 		this.onInvade = onInvade;
 		this.onSetServer = onSetServer;
 		this.colorPickerManager = colorPickerManager;
 		this.onClanColorChosen = onClanColorChosen;
+		this.onSetSlug = onSetSlug;
+		this.onAddClan = onAddClan;
+		this.onSelectClan = onSelectClan;
+		this.onRemoveClan = onRemoveClan;
+		this.onSetEraser = onSetEraser;
 
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -208,13 +230,22 @@ class ClanTurfPanel extends PluginPanel
 		globalHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		globalHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
 
+		globalIntro.setFont(FontManager.getRunescapeSmallFont());
+		globalIntro.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		globalIntro.setAlignmentX(Component.LEFT_ALIGNMENT);
+		globalIntro.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
+		globalIntro.setOpaque(true);
+		globalIntro.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		globalIntro.setText("<html><body style='width:170px'>Every tile claimed or stolen by everyone "
+				+ "playing Clan Turf since launch.</body></html>");
+
 		globalCount.setFont(FontManager.getRunescapeBoldFont().deriveFont(22f));
 		globalCount.setForeground(new Color(0xEB, 0xC7, 0x33)); // celebratory amber
 		globalCount.setAlignmentX(Component.LEFT_ALIGNMENT);
 		// Opaque against the panel background so the count-up timer's rapid text changes clear and
 		// repaint in place, instead of ghosting old digits and forcing a repaint of the whole section.
 		globalCount.setOpaque(true);
-		globalCount.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		globalCount.setBackground(ColorScheme.DARKER_GRAY_COLOR); // matches the box it sits in
 
 		globalSub.setFont(FontManager.getRunescapeSmallFont());
 		globalSub.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
@@ -222,38 +253,168 @@ class ClanTurfPanel extends PluginPanel
 		globalSub.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
 		globalSub.setOpaque(true); // same, so it repaints cleanly if a count change relays out the box
 		globalSub.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		globalSub.setText("<html><body style='width:170px'>Every tile claimed or stolen by everyone "
-				+ "playing Clan Turf since launch. THANK YOU for downloading my plugin and joining the "
-				+ "turf war! Keep pushing that number higher, maybe something interesting will happen"
+		globalSub.setText("<html><body style='width:170px'>THANK YOU for downloading my plugin and joining "
+				+ "the turf war! Keep pushing that number higher, maybe something interesting will happen"
 				+ "...</body></html>");
+
+		// Put the number in a thin bordered box so the whole count row reads as one field.
+		JPanel countBox = new JPanel(new BorderLayout());
+		countBox.setOpaque(true);
+		countBox.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		countBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+		countBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+		countBox.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR, 1),
+				BorderFactory.createEmptyBorder(2, 6, 2, 6)));
+		countBox.add(globalCount, BorderLayout.WEST);
 
 		globalBox.setLayout(new BoxLayout(globalBox, BoxLayout.Y_AXIS));
 		globalBox.setOpaque(false);
 		globalBox.setAlignmentX(Component.LEFT_ALIGNMENT);
 		globalBox.add(globalHeader);
-		globalBox.add(globalCount);
+		globalBox.add(globalIntro);
+		globalBox.add(countBox);
 		globalBox.add(globalSub);
 		globalBox.setVisible(false);
 
-		top.add(header);
-		top.add(headline);
-		top.add(clanHint);
-		top.add(board);
-		top.add(battlesHeader);
-		top.add(battlesBox);
-		top.add(globalBox);
-		top.add(Box.createVerticalStrut(12));
-
-		// Bottom controls row: the Online/Offline toggle next to the Clear button.
+		// Controls row: just the Online/Offline toggle now (Clear moved into the offline sandbox), kept
+		// at its current size and left-aligned. Pinned under the GE-owners headline, above the bars, so
+		// the scoreboard, battles and community below all animate out beneath it on a toggle.
 		JPanel controls = new JPanel();
 		controls.setLayout(new BoxLayout(controls, BoxLayout.X_AXIS));
 		controls.setOpaque(false);
 		controls.setAlignmentX(Component.LEFT_ALIGNMENT);
 		controls.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		controls.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
 		controls.add(serverToggleBtn);
-		controls.add(Box.createHorizontalStrut(6));
-		controls.add(clearOfflineBtn);
+		controls.add(Box.createHorizontalGlue());
+
+		top.add(header);
+		top.add(headline);
+		top.add(clanHint);
 		top.add(controls);
+		top.add(board);
+		top.add(battlesHeader);
+		top.add(battlesBox);
+		top.add(globalBox);
+
+		// Feedback / bug report: opens the plugin's GitHub issue tracker in the browser. The plugin
+		// collects nothing here - reports live on GitHub, not on our server. Set in a slightly lighter
+		// box so it reads as its own footer, apart from the scoreboard above.
+		JLabel reportBlurb = new JLabel("<html><body style='width:150px'>I can't be tick-perfect all the "
+				+ "time. Found a bug with the plug? 1-tick-click that Report Button.</body></html>");
+		reportBlurb.setFont(FontManager.getRunescapeSmallFont());
+		reportBlurb.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		reportBlurb.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JButton reportBtn = new JButton("Report");
+		reportBtn.setFont(FontManager.getRunescapeSmallFont());
+		reportBtn.setFocusable(false);
+		reportBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reportBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		reportBtn.setToolTipText("Open the Clan Turf bug tracker on GitHub in your browser.");
+		reportBtn.addActionListener(e -> LinkBrowser.browse("https://github.com/Zezi-cmd/clan-turf/issues/new"));
+
+		JPanel reportBox = new JPanel();
+		reportBox.setLayout(new BoxLayout(reportBox, BoxLayout.Y_AXIS));
+		reportBox.setOpaque(true);
+		reportBox.setBackground(new Color(0x36, 0x36, 0x36)); // a touch lighter than the panel
+		reportBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+		reportBox.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		reportBox.add(reportBlurb);
+		reportBox.add(Box.createVerticalStrut(6));
+		reportBox.add(reportBtn);
+
+		// Offline sandbox: creative/practice tools that only make sense with no live turf war. Hidden
+		// online; fades in when you go offline. Phase 1 is the Full Slug paint toggle.
+		JLabel sandboxHeader = new JLabel("Offline Tools:");
+		sandboxHeader.setFont(FontManager.getRunescapeBoldFont());
+		sandboxHeader.setForeground(Color.WHITE);
+		sandboxHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+		sandboxHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+
+		slugBtn.setFont(FontManager.getRunescapeSmallFont());
+		slugBtn.setFocusable(false);
+		slugBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		slugBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		slugBtn.setToolTipText("Act on every tile you cross, not just the one you land on (applies to "
+				+ "claiming and to Surrender). Offline only; hides the tiles/hour tracker while on.");
+		slugBtn.addActionListener(e ->
+		{
+			boolean next = !slugOn;
+			setSlug(next); // optimistic label update
+			if (onSetSlug != null)
+			{
+				onSetSlug.accept(next);
+			}
+		});
+
+		eraserBtn.setFont(FontManager.getRunescapeSmallFont());
+		eraserBtn.setFocusable(false);
+		eraserBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		eraserBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		eraserBtn.setToolTipText("Surrender: your steps erase claimed tiles back to unclaimed instead of "
+				+ "claiming (unclaimed tiles are left alone). Full Slug makes it erase every tile you "
+				+ "cross. Offline only.");
+		eraserBtn.addActionListener(e ->
+		{
+			boolean next = !eraserOn;
+			setEraser(next); // optimistic label update
+			if (onSetEraser != null)
+			{
+				onSetEraser.accept(next);
+			}
+		});
+
+		// "Paint as" roster: add test clans and click one to paint as it. Recolor any of them by clicking
+		// its scoreboard bar up top, same as always.
+		JLabel paintHeader = new JLabel("Claim tiles as");
+		paintHeader.setFont(FontManager.getRunescapeSmallFont());
+		paintHeader.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		paintHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+		paintHeader.setBorder(BorderFactory.createEmptyBorder(10, 0, 4, 0));
+
+		JButton addClanBtn = new JButton("Add clan");
+		addClanBtn.setFont(FontManager.getRunescapeSmallFont());
+		addClanBtn.setFocusable(false);
+		addClanBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		addClanBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		addClanBtn.setToolTipText("Add a test clan you can paint as (offline sandbox only).");
+		addClanBtn.addActionListener(e ->
+		{
+			String name = JOptionPane.showInputDialog(this, "Clan name:", "Add clan",
+					JOptionPane.PLAIN_MESSAGE);
+			if (name != null && !name.trim().isEmpty() && onAddClan != null)
+			{
+				onAddClan.accept(name.trim());
+			}
+		});
+
+		paintClansBox.setLayout(new BoxLayout(paintClansBox, BoxLayout.Y_AXIS));
+		paintClansBox.setOpaque(false);
+		paintClansBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		sandboxBox.setLayout(new BoxLayout(sandboxBox, BoxLayout.Y_AXIS));
+		sandboxBox.setOpaque(false);
+		sandboxBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+		sandboxBox.add(sandboxHeader);
+		sandboxBox.add(clearOfflineBtn);
+		sandboxBox.add(Box.createVerticalStrut(4));
+		sandboxBox.add(slugBtn);
+		sandboxBox.add(eraserBtn);
+		sandboxBox.add(paintHeader);
+		sandboxBox.add(paintClansBox);
+		sandboxBox.add(Box.createVerticalStrut(4));
+		sandboxBox.add(addClanBtn);
+		sandboxBox.setVisible(false);
+		setSlug(false);
+		setEraser(false);
+
+		top.add(sandboxBox);
+
+		// Report sits at the very bottom in both modes (below the offline tools when they're shown).
+		top.add(Box.createVerticalStrut(10));
+		top.add(reportBox);
 
 		add(top, BorderLayout.NORTH);
 
@@ -275,6 +436,12 @@ class ClanTurfPanel extends PluginPanel
 			serverToggleBtn.setForeground(serverOn
 					? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
 			clearOfflineBtn.setEnabled(offline);
+			// Offline sandbox tools: shown only offline, faded in on the online -> offline switch.
+			sandboxBox.setVisible(offline);
+			if (offline && wasOnline)
+			{
+				scheduleReveal(sandboxBox, System.currentTimeMillis());
+			}
 			if (serverOn && !wasOnline)
 			{
 				// Just came online: hold the offline content until the server data loads (so it doesn't
@@ -286,6 +453,92 @@ class ClanTurfPanel extends PluginPanel
 				revealHoldUntil = System.currentTimeMillis() + REVEAL_HOLD_MS;
 			}
 		});
+	}
+
+	/** Reflect the offline Full Slug state on its button (from the plugin's saved state, or a click). */
+	void setSlug(boolean on)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			slugOn = on;
+			slugBtn.setText(on ? "Full Slug: On" : "Full Slug: Off");
+			slugBtn.setForeground(on ? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
+		});
+	}
+
+	/** Reflect the offline Eraser state on its button (from the plugin's saved state, or a click). */
+	void setEraser(boolean on)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			eraserOn = on;
+			eraserBtn.setText(on ? "Surrender tiles: On" : "Surrender tiles: Off");
+			eraserBtn.setForeground(on ? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
+		});
+	}
+
+	/** Rebuild the offline "paint as" roster: your clan (locked) plus test clans, the selected one lit. */
+	void setPaintClans(List<String> clans, String realClan, String selected)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			paintClansBox.removeAll();
+			for (String clan : clans)
+			{
+				boolean isReal = realClan != null && clan.equalsIgnoreCase(realClan);
+				boolean isSelected = selected != null && clan.equalsIgnoreCase(selected);
+				paintClansBox.add(paintClanRow(clan, isReal, isSelected));
+			}
+			paintClansBox.revalidate();
+			paintClansBox.repaint();
+		});
+	}
+
+	/** One roster row: a clickable clan name in its color, plus an 'x' remove button for test clans. */
+	private JPanel paintClanRow(String clan, boolean isReal, boolean isSelected)
+	{
+		JPanel row = new JPanel(new BorderLayout(4, 0));
+		row.setOpaque(true);
+		row.setBackground(isSelected ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+		row.setBorder(BorderFactory.createEmptyBorder(3, 6, 3, 4));
+
+		JLabel name = new JLabel((isSelected ? "→ " : "") + clan);
+		name.setFont(isSelected ? FontManager.getRunescapeBoldFont() : FontManager.getRunescapeFont());
+		name.setForeground(ClanTurfColors.forClan(clan));
+		name.setToolTipText("Paint as " + clan);
+		name.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		name.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (onSelectClan != null)
+				{
+					onSelectClan.accept(clan);
+				}
+			}
+		});
+		row.add(name, BorderLayout.CENTER);
+
+		if (!isReal)
+		{
+			JButton remove = new JButton("x");
+			remove.setFont(FontManager.getRunescapeSmallFont());
+			remove.setFocusable(false);
+			remove.setMargin(new Insets(0, 4, 0, 4));
+			remove.setToolTipText("Remove " + clan);
+			remove.addActionListener(e ->
+			{
+				if (onRemoveClan != null)
+				{
+					onRemoveClan.accept(clan);
+				}
+			});
+			row.add(remove, BorderLayout.EAST);
+		}
+		return row;
 	}
 
 	void showEmpty(String message)

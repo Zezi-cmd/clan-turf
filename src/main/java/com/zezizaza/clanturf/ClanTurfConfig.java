@@ -298,12 +298,26 @@ public interface ClanTurfConfig extends Config
 			keyName = "clanColorWhitelist",
 			section = clanSection,
 			name = "Clan color list",
-			description = "Per-clan colors, local only, as ClanName=RRGGBB separated by commas "
-					+ "(e.g. Wrath=EC1F1F,Some Clan=228B22). Click any clan's bar in the side panel - your own "
-					+ "included - to set one with the color wheel. Easy to copy and paste to share a palette.",
+			description = "Per-clan colors for the live game, local only, as ClanName=RRGGBB separated by "
+					+ "commas (e.g. Wrath=EC1F1F,Some Clan=228B22). Click any clan's bar in the side panel "
+					+ "while online to set one. Easy to copy and paste to share a palette.",
 			position = 13
 	)
 	default String clanColorWhitelist()
+	{
+		return "";
+	}
+
+	@ConfigItem(
+			keyName = "offlineClanColors",
+			section = clanSection,
+			name = "Offline color list",
+			description = "Same format, but for the offline sandbox only - so your test-clan colors stay "
+					+ "out of the shareable list above. Set by clicking bars while offline; layered on top "
+					+ "of the main list when offline.",
+			position = 14
+	)
+	default String offlineClanColors()
 	{
 		return "";
 	}
@@ -579,6 +593,36 @@ public interface ClanTurfConfig extends Config
 	default int gleamOpacity()
 	{
 		return 215;
+	}
+
+	// Offline sandbox state, driven by the side-panel toggles (hidden so the sandbox lives in the panel).
+
+	@ConfigItem(keyName = "fullSlug", name = "Full slug mode", description = "Offline only.",
+			position = 130, hidden = true)
+	default boolean fullSlug()
+	{
+		return false;
+	}
+
+	@ConfigItem(keyName = "sandboxClans", name = "Sandbox clans", description = "Offline only.",
+			position = 131, hidden = true)
+	default String sandboxClans()
+	{
+		return "";
+	}
+
+	@ConfigItem(keyName = "eraser", name = "Eraser mode", description = "Offline only.",
+			position = 132, hidden = true)
+	default boolean eraser()
+	{
+		return false;
+	}
+
+	@ConfigItem(keyName = "lastClan", name = "Last clan", description = "Internal.",
+			position = 133, hidden = true)
+	default String lastClan()
+	{
+		return "";
 	}
 
 
