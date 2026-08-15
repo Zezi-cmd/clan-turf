@@ -48,9 +48,16 @@ A running all-time counter tracks every tile claimed or stolen across every clan
 
 ![Community Claims](images/comclaim.png)
 
-## Practice offline
+## Offline sandbox
 
-The two buttons under Community Claims are the **Online/Offline** toggle and **Clear my tiles**. Offline mode lets you experiment with Clan Turf without connecting to the sync server. Only your local claims are shown and nothing is sent. **Clear my tiles** is available offline to wipe the current world's local claims.
+Flip the **Online/Offline** toggle at the top of the panel to Offline and Clan Turf runs local-only: you see just your own claims, nothing is sent, and an **Offline Tools** box opens with a little sandbox to mess around in:
+
+- **Clear all tiles** wipes the current world's local claims.
+- **Full Slug** paints every tile you cross, not just the one you land on, so you can fill areas fast (it also hides the tiles/hour tracker while on).
+- **Surrender tiles** flips your steps into an eraser, wiping claimed tiles back to unclaimed. With Full Slug on it erases everything you cross; off, just the tiles you walk over.
+- **Claim tiles as** lets you add test clans and switch which one you're painting, so you can lay out a whole battle yourself. Recolor any clan by clicking its scoreboard bar; offline picks are saved in a separate list so they never touch your shareable one.
+
+None of it is sent anywhere or counts toward the live game - it's a local playground.
 
 ## Rally your clan in chat
 
@@ -104,7 +111,8 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 
 - **Clan chat commands** - Turn `!defend` / `!invade` in clan chat into rally calls.
 - **Custom clan colors** - Apply your local clan color list (below). Off = every clan uses its auto color.
-- **Clan color list** - Per-clan colors as `ClanName=RRGGBB`, comma-separated. Set them by clicking bars in the side panel; copy and paste to share.
+- **Clan color list** - Per-clan colors for the live game as `ClanName=RRGGBB`, comma-separated. Set them by clicking bars in the side panel while online; copy and paste to share.
+- **Offline color list** - Same format, but for the offline sandbox only, so test-clan colors stay out of the shareable list.
 
 ### Network
 
