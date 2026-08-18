@@ -32,34 +32,34 @@ The side panel ranks every clan on your world by tiles held, with each clan's sh
 
 ![Scoreboard](images/scoreboard.png)
 
-## Pick your clan colors
-
-Every clan is auto-assigned its own color, but you can override any of them. Hover a bar in the side panel to highlight it and click to open the color wheel - pick a color for your own clan or a rival's. Your picks are saved to a local color list you can copy and paste to share a whole palette with clanmates. It's all local, so everyone else still sees their own colors.
-
-Colorblind? A **Colorblind** mode in the settings adjusts every clan color, auto and custom alike, to be easier to tell apart - protanopia, deuteranopia, or tritanopia.
-
-![Colorblind](images/colorblind.png)
-
 ## Active battles
 
 See which worlds are contested, with the leading clan and closest rival shown for each world. Click **Invade** to hop to a rival's world, or **Defend** to jump to one your clan already holds.
 
 ![Active battles](images/activebattles.png)
 
+## Pick your clan colors
+
+Every clan is auto-assigned its own color, but you can override any of them. Hover a bar in the side panel to highlight it and click to open the color wheel - pick a color for your own clan or a rival's. Your picks are saved to a local color list you can copy and paste to share a whole palette with clanmates. It's all local, so everyone else still sees their own colors.
+
+Colorblind? A **Colorblind mode** in the settings adjusts every clan color, auto and custom alike, to be easier to tell apart - protanopia, deuteranopia, or tritanopia.
+
+![Colorblind](images/colorblind.png)
+
 ## Community Claims
 
-A running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in with a count-up animation. The counter shifts through increasingly rare colors as the total grows.
+A running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in.
 
 ![Community Claims](images/comclaim.png)
 
-## Offline sandbox
+## Offline mode
 
 Flip the **Online/Offline** toggle at the top of the panel to Offline and Clan Turf runs local-only: you see just your own claims, nothing is sent, and an **Offline Tools** box opens with a little sandbox to mess around in:
 
 - **Clear all tiles** wipes the current world's local claims.
 - **Full Slug** paints every tile you cross, not just the one you land on, so you can fill areas fast (it also hides the tiles/hour tracker while on).
 - **Surrender tiles** flips your steps into an eraser, wiping claimed tiles back to unclaimed. With Full Slug on it erases everything you cross; off, just the tiles you walk over.
-- **Claim tiles as** lets you add test clans and switch which one you're painting, so you can lay out a whole battle yourself. Recolor any clan by clicking its scoreboard bar; offline picks are saved in a separate list so they never touch your shareable one.
+- **Claim tiles as** lets you add test clans and switch which one you're painting, so you can lay out a whole battle yourself. Recolor any clan by clicking its scoreboard bar; offline picks are saved in a separate list so they never touch your online one.
 
 None of it is sent anywhere or counts toward the live game - it's a local playground.
 
@@ -119,7 +119,7 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 
 - **Clan chat commands** - Turn `!defend` / `!invade` in clan chat into rally calls.
 - **Custom clan colors** - Apply your local clan color list (below). Off = every clan uses its auto color.
-- **Clan color list** - Per-clan colors for the live game as `ClanName=RRGGBB`, comma-separated. Set them by clicking bars in the side panel while online; copy and paste to share.
+- **Online color list** - Per-clan colors for the live game as `ClanName=RRGGBB`, comma-separated. Set them by clicking bars in the side panel while online; copy and paste to share.
 - **Offline color list** - Same format, but for the offline sandbox only, so test-clan colors stay out of the shareable list.
 
 ![Clan settings](images/configclan.png)
@@ -134,7 +134,7 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 
 - **Reset countdown** - Show the countdown and clan warnings before the daily reset.
 - **Tiles/hour tracker** - Show the tiles-claimed and TPH overlay. Shift + right-click to reset.
-- **Colorblind** - Daltonize all clan colors for easier separation: protanopia, deuteranopia, or tritanopia.
+- **Colorblind mode** - Daltonize all clan colors for easier separation: protanopia, deuteranopia, or tritanopia.
 
 ![Extras settings](images/configextras.png)
 

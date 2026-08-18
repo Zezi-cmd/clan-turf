@@ -297,7 +297,7 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(
 			keyName = "clanColorWhitelist",
 			section = clanSection,
-			name = "Clan color list",
+			name = "Online color list",
 			description = "Per-clan colors for the live game, local only, as ClanName=RRGGBB separated by "
 					+ "commas (e.g. Wrath=EC1F1F,Some Clan=228B22). Click any clan's bar in the side panel "
 					+ "while online to set one. Easy to copy and paste to share a palette.",
@@ -370,7 +370,7 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(
 			keyName = "colorblindMode",
 			section = extrasSection,
-			name = "Colorblind",
+			name = "Colorblind mode",
 			description = "Adjust every clan color to be easier to tell apart for a type of color blindness "
 					+ "(daltonization): Protanopia (red), Deuteranopia (green), Tritanopia (blue). Applies to "
 					+ "auto colors and your custom color list. Local only.",
