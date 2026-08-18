@@ -22,7 +22,7 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 ## Pre-claimed pockets
 
-Parts of the Grand Exchange aren't walkable - the central building, the stalls, the staircases. Rather than leave holes in a clan's territory, Clan Turf fills those pockets in the current owner's color (white while the GE is unclaimed) so turf reads as one solid block, and they recolor on takeover right along with the boundary. Purely cosmetic: these tiles are never claimable and never counted. Turn it off with **Show Pre-Claims**.
+Parts of the Grand Exchange aren't walkable - the stools, the stalls, the walls, the foliage. Rather than leave holes in a clan's territory, Clan Turf fills those pockets in the current owner's color (white while the GE is unclaimed) so turf reads as one solid block, and they recolor on takeover right along with the boundary. Purely cosmetic: these tiles are never claimable and never counted. Turn it off with **Show Pre-Claims**.
 
 ![Pre-claims](images/preclaims.png)
 

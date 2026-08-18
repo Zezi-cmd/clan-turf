@@ -203,7 +203,7 @@ public interface ClanTurfConfig extends Config
 			keyName = "showPreClaims",
 			section = appearanceSection,
 			name = "Show Pre-Claims",
-			description = "Fill the unwalkable GE pockets (the central building, stalls, staircases) in the "
+			description = "Fill the unwalkable GE pockets (the stools, stalls, walls, foliage) in the "
 					+ "current owner's color so a clan's turf reads solid, white when unclaimed. Off leaves "
 					+ "them empty. Either way these tiles are never claimable and never counted.",
 			position = 10
