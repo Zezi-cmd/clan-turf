@@ -38,6 +38,12 @@ See which worlds are contested, with the leading clan and closest rival shown fo
 
 ![Active battles](images/activebattles.png)
 
+## Community Claims
+
+A running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in.
+
+![Community Claims](images/comclaim.png)
+
 ## Pick your clan colors
 
 Every clan is auto-assigned its own color, but you can override any of them. Hover a bar in the side panel to highlight it and click to open the color wheel - pick a color for your own clan or a rival's. Your picks are saved to a local color list you can copy and paste to share a whole palette with clanmates. It's all local, so everyone else still sees their own colors.
@@ -45,12 +51,6 @@ Every clan is auto-assigned its own color, but you can override any of them. Hov
 Colorblind? A **Colorblind mode** in the settings adjusts every clan color, auto and custom alike, to be easier to tell apart - protanopia, deuteranopia, or tritanopia.
 
 ![Colorblind](images/colorblind.png)
-
-## Community Claims
-
-A running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in.
-
-![Community Claims](images/comclaim.png)
 
 ## Offline mode
 
