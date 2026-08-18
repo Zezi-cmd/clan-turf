@@ -20,6 +20,10 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 ![Takeover](images/takeover.png)
 
+## The crowd reacts
+
+Take the GE while you're standing in it and the whole cast of Grand Exchange NPCs calls it out overhead, each in character. Brugsen Bursen pulls rank as director, Bob Barter talks herbs, the Emblem Trader mutters something ominous, the recruiters cheer for their god, and the clan-portal clerk - a fan of every clan - applauds the win. Each NPC draws at random from its own pool of lines, rendered in the game's overhead yellow with your clan's name picked out in its color. The crowd announces in a stagger rather than all at once, it only fires on an ownership flip, and nothing is ever posted to the chat box. Toggle it with **NPC takeover text**.
+
 ## Pre-claimed pockets
 
 Parts of the Grand Exchange aren't walkable - the stools, the stalls, the walls, the foliage. Rather than leave holes in a clan's territory, Clan Turf fills those pockets in the current owner's color (white while the GE is unclaimed) so turf reads as one solid block, and they recolor on takeover right along with the boundary. Purely cosmetic: these tiles are never claimable and never counted. Turn it off with **Show Pre-Claims**.
@@ -112,6 +116,7 @@ The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max T
 - **Border animation** - On a takeover, raise the boundary into a wall, or just fade it to the new color (flat).
 - **Announce takeovers** - Post a clan-tab message when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud.
+- **NPC takeover barks** - When the GE changes hands while you're there, the Grand Exchange NPCs react with overhead chatter naming the new owner, in that clan's color with a little wave. Visual only, never posted to chat.
 
 ![Takeover settings](images/configtakeover.png)
 

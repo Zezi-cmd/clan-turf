@@ -253,6 +253,20 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
+			keyName = "npcBarks",
+			section = takeoverSection,
+			name = "NPC takeover text",
+			description = "When the GE changes hands, the crowd of Grand Exchange NPCs reacts with overhead "
+					+ "chatter announcing the new owner. Purely visual - nothing is posted to chat. Only fires "
+					+ "on an ownership flip while you are at the GE.",
+			position = 10
+	)
+	default boolean npcBarks()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 			keyName = "tileWalls",
 			section = appearanceSection,
 			name = "Tile walls",

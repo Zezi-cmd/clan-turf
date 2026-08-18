@@ -50,6 +50,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.clan.ClanChannel;
 import net.runelite.api.coords.LocalPoint;
@@ -100,6 +101,7 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ClanTurfResetOverlay resetOverlay;
 	@Inject private ClanTurfTrackerOverlay trackerOverlay;
 	@Inject private ClanTurfWorldMapOverlay worldMapOverlay;
+	@Inject private ClanTurfBarkOverlay barkOverlay;
 	@Inject private AudioPlayer audioPlayer;
 
 	// The seam pays off here: both stores implement ClanTurfStore, and startUp picks one.
@@ -136,6 +138,141 @@ public class ClanTurfPlugin extends Plugin
 	/** The model tile last game tick, so slug-off Surrender only erases once you MOVE onto a new one
 	 * (flipping Surrender on doesn't wipe the tile you're standing on). */
 	private WorldPoint lastEraseTile;
+
+	/** The GE cast that reacts to a takeover with overhead barks, matched as name PREFIXES so
+	 * "Farid Morrisane (ores and bars)" matches on "farid morrisane". Pets and passers-by aren't in
+	 * the set, so they never bark. */
+	private static final java.util.Set<String> GE_NPC_NAMES = new java.util.HashSet<>(java.util.Arrays.asList(
+			"brugsen bursen", "grand exchange clerk", "banker", "farid morrisane", "abigaila",
+			"perdu", "emblem trader", "hofuthand", "relobo blinyo", "bob barter", "clerk",
+			"murky matt", "meredith", "zamorakian recruiter", "saradominist recruiter"));
+	/** NPCs currently barking, mapped to their bark (line + staggered reveal time). ClanTurfBarkOverlay
+	 * draws these above each NPC in the new owner's clan color (we render the text ourselves, since the
+	 * game's overhead text is plain white and ignores color); each shows for {@link #BARK_MS}. */
+	private final Map<NPC, Bark> barkTexts = new HashMap<>();
+	private Color barkColor = Color.WHITE;
+	private String barkClan = "";
+	private long barkClearAtMs;
+	private static final long BARK_MS = 4000L;
+	/** Max random delay before an NPC pops its bark, so the crowd announces in a stagger, not all at
+	 * once. Each NPC still announces exactly once per takeover. */
+	private static final long BARK_STAGGER_MS = 1600L;
+
+	/** A single NPC's takeover bark: its line and when it appears (staggered per NPC). */
+	static final class Bark
+	{
+		final String text;
+		final long revealAt;
+
+		Bark(String text, long revealAt)
+		{
+			this.text = text;
+			this.revealAt = revealAt;
+		}
+	}
+
+	// Lore-flavored bark pools, one per GE character (%s = the new owner clan, upper-cased), chosen
+	// by name in lorePool(). Anyone unmatched uses GENERIC_LINES. Kept short to fit an overhead line.
+	private static final String[] GENERIC_LINES = {
+		"%s turf!",
+		"%s runs the Exchange now!",
+		"New owners: %s!",
+		"The Exchange belongs to %s!",
+		"%s took the GE!",
+		"All hail %s!",
+		"%s holds the Grand Exchange!",
+		"This is %s ground now!"
+	};
+	// Brugsen Bursen - gnome director/founder of the Grand Exchange.
+	private static final String[] BRUGSEN_LINES = {
+		"As director, I recognize %s.",
+		"%s controls my Exchange now.",
+		"The Exchange answers to %s."
+	};
+	// Grand Exchange clerks - process the trades at the central desks.
+	private static final String[] CLERK_LINES = {
+		"The ledger reads %s now.",
+		"%s clears every trade.",
+		"All orders route through %s."
+	};
+	// The lone clan-portal Clerk - a clerk who's also an enthusiastic fan of every clan.
+	private static final String[] CLERK_PORTAL_LINES = {
+		"Stamping the win for %s!",
+		"Logging another win for %s!",
+		"Well played, %s!"
+	};
+	// The bankers standing beside the clerks.
+	private static final String[] BANKER_LINES = {
+		"I'd bank on %s now.",
+		"%s holds the deeds now.",
+		"%s's account looks healthy."
+	};
+	// Farid Morrisane - son of Ali Morrisane; ores, bars and gems price guide.
+	private static final String[] FARID_LINES = {
+		"Father would deal with %s.",
+		"%s has the ore trade now.",
+		"Even the bars belong to %s."
+	};
+	// Abigaila - a nervous refugee from Morytania.
+	private static final String[] ABIGAILA_LINES = {
+		"%s rules here now... oh dear.",
+		"Is %s's turf safe, I wonder?",
+		"I fled Morytania for %s's ground?"
+	};
+	// Perdu - dwarven merchant of the Lost Property shop; reclaims lost items.
+	private static final String[] PERDU_LINES = {
+		"Lost the GE? %s found it.",
+		"%s reclaimed the whole Exchange.",
+		"No reclaiming this from %s."
+	};
+	// Emblem Trader - mysterious Bounty Hunter / Wilderness merchant.
+	private static final String[] EMBLEM_LINES = {
+		"%s claimed it, not a drop spilled.",
+		"The emblems favor %s today.",
+		"%s... fitting name for owners."
+	};
+	// Hofuthand - the dwarf; weapons and armour price guide.
+	private static final String[] HOFUTHAND_LINES = {
+		"%s came armed and took it.",
+		"%s has the armoury now.",
+		"%s's got the sharpest claim."
+	};
+	// Relobo Blinyo - came from Shilo Village to sell logs.
+	private static final String[] RELOBO_LINES = {
+		"All the way from Shilo, now %s's.",
+		"%s is stacking logs and turf.",
+		"Timber! And %s takes the GE."
+	};
+	// Bob Barter - herbs and potions guide; decants potions.
+	private static final String[] BOB_LINES = {
+		"%s is brewing something strong.",
+		"The herbs answer to %s now.",
+		"%s decanted the competition."
+	};
+	// Murky Matt (Matthew Grey) - runes price guide.
+	private static final String[] MURKY_LINES = {
+		"The runes point to %s.",
+		"%s has the rune trade now.",
+		"Matthew says: %s owns this."
+	};
+	// Meredith - runs the Games Zone board games.
+	private static final String[] MEREDITH_LINES = {
+		"Game. Set. Match! %s wins!",
+		"%s won this round.",
+		"%s plays for keeps."
+	};
+	// Zamorakian recruiter - Castle Wars, for chaos and Zamorak.
+	private static final String[] ZAMORAK_LINES = {
+		"Zamorak smiles on %s!",
+		"Chaos and %s claim the GE!",
+		"%s takes what it wants. Good."
+	};
+	// Saradominist recruiter - Castle Wars, for order and Saradomin.
+	private static final String[] SARADOMIN_LINES = {
+		"May Saradomin guide %s.",
+		"%s holds it in good order.",
+		"Saradomin blesses %s's claim."
+	};
 
 	/** When we most recently had no clan channel, so the panel only shows the "join a clan" hint once
 	 * the channel has had time to load (it arrives seconds after login and drops on a hop). Otherwise
@@ -250,6 +387,7 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.add(resetOverlay);
 		overlayManager.add(trackerOverlay);
 		overlayManager.add(worldMapOverlay);
+		overlayManager.add(barkOverlay);
 
 		selectStore();
 
@@ -278,6 +416,7 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.remove(resetOverlay);
 		overlayManager.remove(trackerOverlay);
 		overlayManager.remove(worldMapOverlay);
+		overlayManager.remove(barkOverlay);
 		clientToolbar.removeNavigation(navButton);
 		if (store != null)
 		{
@@ -293,6 +432,7 @@ public class ClanTurfPlugin extends Plugin
 		}
 		whitelistApplied.clear();
 		ClanTurfColors.setColorblindMode(ColorblindMode.NONE);
+		clearBarks();
 	}
 
 	/** Picks the local or networked store from the config and starts it. */
@@ -461,6 +601,7 @@ public class ClanTurfPlugin extends Plugin
 			leaderInit = false; // re-baseline the committed leader silently on the new world
 			announcedOwner = null; // re-baseline the global takeover detector on the new world
 			animStartMs = 0;    // don't let a takeover animation bleed from the old world onto the new
+			clearBarks();       // and don't drag overhead barks across a hop
 			trail.clear();      // snail-trail tiles are per-world coords; don't drag them across a hop
 			eraseFlash.clear();
 			lastTrailTile = null;
@@ -471,6 +612,12 @@ public class ClanTurfPlugin extends Plugin
 		WorldPoint here = local.getWorldLocation();
 		boolean nearGe = here != null && GrandExchangeArea.near(here, ACTIVE_MARGIN);
 		nearGeNow = nearGe;
+
+		// Overhead takeover barks don't decay on their own; wipe them once their window passes.
+		if (barkClearAtMs != 0L && System.currentTimeMillis() >= barkClearAtMs)
+		{
+			clearBarks();
+		}
 
 		updateResetPings(nearGe);
 
@@ -544,6 +691,20 @@ public class ClanTurfPlugin extends Plugin
 	@Subscribe
 	public void onClientTick(ClientTick tick)
 	{
+		// While a takeover chorus is up, wipe each barking NPC's own yellow idle text every frame so it
+		// can't clash with our colored bark. We render our bark separately, so this only kills the native
+		// overhead text, not ours.
+		if (barkClearAtMs != 0L)
+		{
+			for (NPC npc : barkTexts.keySet())
+			{
+				if (npc != null && npc.getOverheadText() != null)
+				{
+					npc.setOverheadText(null);
+				}
+			}
+		}
+
 		// Snail trail: sample the tile under the moving character model each frame and remember it with
 		// a timestamp, so the overlay can paint a fading trail beneath your feet - including the tiles you
 		// skip while running. Visual only: it never claims or counts a tile (that stays true-tile on the
@@ -1150,6 +1311,10 @@ public class ClanTurfPlugin extends Plugin
 			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "clanColorWhitelist",
 					upsertWhitelist(config.clanColorWhitelist(), clan, color));
 		}
+		// Apply the new color and rebuild the paint-as roster now, so its labels recolor immediately
+		// instead of waiting for the next select (the config-change path also refreshes, harmlessly).
+		applyWhitelist();
+		pushPaintClans();
 	}
 
 	/** Invade a battle's world: stage a quick-hop. Called from the panel on the Swing EDT. */
@@ -1518,8 +1683,178 @@ public class ClanTurfPlugin extends Plugin
 		{
 			announceTakeover(newLeader);
 			fireTakeoverSound();
+			fireTakeoverBarks(newLeader);
 		}
 		log.debug("Takeover: {} -> {}", previous, newLeader);
+	}
+
+	/**
+	 * Overhead "chorus": on a confirmed takeover the crowd of Grand Exchange NPCs reacts with random
+	 * barks naming the new owner. Purely visual (RuneLite overhead text, decays on its own) - nothing
+	 * is posted to chat. Every NPC near the GE speaks, except the dense clerk cluster in the middle,
+	 * which fires every other one so it doesn't become a solid wall of bubbles. One-shot on the event;
+	 * never looped. Runs on the client thread (called from the GameTick takeover path).
+	 */
+	private void fireTakeoverBarks(String newLeader)
+	{
+		if (newLeader == null || !config.npcBarks())
+		{
+			return;
+		}
+		clearBarks(); // wipe any barks still showing from a previous flip
+		barkColor = ClanTurfColors.forClan(newLeader);
+		String clan = newLeader.toUpperCase(java.util.Locale.ROOT);
+		barkClan = clan;
+		long now = System.currentTimeMillis();
+		int clerkIdx = 0;
+		int bankerIdx = 0;
+		for (NPC npc : client.getNpcs())
+		{
+			if (npc == null)
+			{
+				continue;
+			}
+			String name = npc.getName();
+			if (name == null)
+			{
+				continue;
+			}
+			String nl = name.toLowerCase(java.util.Locale.ROOT);
+			if (!isGeNpc(nl))
+			{
+				continue; // only the GE cast reacts - never pets or passers-by
+			}
+			WorldPoint loc = npc.getWorldLocation();
+			if (loc == null || !GrandExchangeArea.near(loc, ACTIVE_MARGIN))
+			{
+				continue;
+			}
+			if (nl.startsWith("grand exchange clerk") && clerkIdx++ > 0)
+			{
+				continue; // 4 GE clerks cluster in the center: only the first one speaks
+			}
+			if (nl.startsWith("banker") && bankerIdx++ > 0)
+			{
+				continue; // 4 bankers cluster in the center: only the first one speaks
+			}
+			long revealAt = now + java.util.concurrent.ThreadLocalRandom.current()
+					.nextLong(BARK_STAGGER_MS);
+			String[] pool = lorePool(nl);
+			String line = String.format(
+					pool[java.util.concurrent.ThreadLocalRandom.current().nextInt(pool.length)], clan);
+			barkTexts.put(npc, new Bark(line, revealAt));
+		}
+		barkClearAtMs = now + BARK_STAGGER_MS + BARK_MS;
+	}
+
+	/** True if an NPC name (lower-cased) starts with one of the GE cast prefixes. */
+	private boolean isGeNpc(String nameLower)
+	{
+		for (String base : GE_NPC_NAMES)
+		{
+			if (nameLower.startsWith(base))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The lore-flavored bark pool for a GE NPC by (lower-cased) name; generic if unmatched. */
+	private String[] lorePool(String nl)
+	{
+		if (nl.startsWith("grand exchange clerk"))
+		{
+			return CLERK_LINES;
+		}
+		if (nl.startsWith("clerk"))
+		{
+			return CLERK_PORTAL_LINES;
+		}
+		if (nl.startsWith("banker"))
+		{
+			return BANKER_LINES;
+		}
+		if (nl.startsWith("brugsen"))
+		{
+			return BRUGSEN_LINES;
+		}
+		if (nl.startsWith("farid"))
+		{
+			return FARID_LINES;
+		}
+		if (nl.startsWith("abigaila"))
+		{
+			return ABIGAILA_LINES;
+		}
+		if (nl.startsWith("perdu"))
+		{
+			return PERDU_LINES;
+		}
+		if (nl.startsWith("emblem"))
+		{
+			return EMBLEM_LINES;
+		}
+		if (nl.startsWith("hofuthand"))
+		{
+			return HOFUTHAND_LINES;
+		}
+		if (nl.startsWith("relobo"))
+		{
+			return RELOBO_LINES;
+		}
+		if (nl.startsWith("bob barter"))
+		{
+			return BOB_LINES;
+		}
+		if (nl.startsWith("murky matt"))
+		{
+			return MURKY_LINES;
+		}
+		if (nl.startsWith("meredith"))
+		{
+			return MEREDITH_LINES;
+		}
+		if (nl.startsWith("zamorakian"))
+		{
+			return ZAMORAK_LINES;
+		}
+		if (nl.startsWith("saradominist"))
+		{
+			return SARADOMIN_LINES;
+		}
+		return GENERIC_LINES;
+	}
+
+	/** Wipes any active takeover barks and resets the timer. */
+	private void clearBarks()
+	{
+		barkTexts.clear();
+		barkClearAtMs = 0L;
+	}
+
+	/** The current takeover barks (NPC -&gt; bark) for the bark overlay to draw. */
+	Map<NPC, Bark> getBarks()
+	{
+		return barkTexts;
+	}
+
+	/** The clan color the current barks render in (used for the clan name inside each line). */
+	Color getBarkColor()
+	{
+		return barkColor;
+	}
+
+	/** The upper-cased clan name embedded in the current barks, so the overlay can color just it. */
+	String getBarkClan()
+	{
+		return barkClan;
+	}
+
+	/** How long a bark stays up once it appears, in ms. */
+	long getBarkDurationMs()
+	{
+		return BARK_MS;
 	}
 
 	/** Posts the "[CT] The Grand Exchange belongs to X" callout in the clan tab (if enabled). */
