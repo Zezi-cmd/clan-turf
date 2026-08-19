@@ -724,9 +724,10 @@ public class ClanTurfPlugin extends Plugin
 		pruneTrail();
 		boolean slug = isSlugPainting();
 		boolean surrender = isErasing();
-		// Trail obeys the Snail trail setting either way: white while surrendering, clan-colored otherwise
-		// (needs a clan for a color). Off = no trail, even during surrender.
-		boolean wantTrail = config.snailTrail() && (surrender || paintClan() != null);
+		// Trail obeys the Snail trail setting: clan-colored when you have a clan to paint as, white while
+		// surrendering, and white for a no-clanner (visual feedback only - they still can't claim). Off =
+		// no trail. Near-GE gating is applied below.
+		boolean wantTrail = config.snailTrail();
 		if ((!wantTrail && !slug) || !nearGeNow)
 		{
 			return;
@@ -969,8 +970,8 @@ public class ClanTurfPlugin extends Plugin
 		return TRAIL_MS;
 	}
 
-	/** The snail-trail color: white while erasing (a neutral run), else the clan you're painting as; null
-	 * means no trail (no clan and not erasing). */
+	/** The snail-trail color: white while erasing (a neutral run), your clan's color when you have one to
+	 * paint as, or neutral white for a no-clanner (they get the walking visual but never claim). */
 	Color getTrailColor()
 	{
 		if (isErasing())
@@ -978,7 +979,7 @@ public class ClanTurfPlugin extends Plugin
 			return Color.WHITE;
 		}
 		String clan = paintClan();
-		return clan == null ? null : ClanTurfColors.forClan(clan);
+		return clan == null ? Color.WHITE : ClanTurfColors.forClan(clan);
 	}
 
 	/** Tiles just erased, for the overlay's white flash, and how long that flash lasts. */
