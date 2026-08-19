@@ -32,7 +32,6 @@ import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
@@ -57,8 +56,8 @@ class ClanTurfBarkOverlay extends Overlay
 	private static final double WAVE_SPEED = 0.006;
 	/** Phase offset between adjacent characters, so the wave travels along the word. */
 	private static final double WAVE_SPACING = 0.6;
-	/** The final slice of a bark's life spent fading out, in milliseconds. */
-	private static final long FADE_MS = 700;
+	/** Vertical gap left between stacked lines so rows don't touch/clip. */
+	private static final int LINE_GAP = 6;
 	/** Locked font size for the takeover text. */
 	private static final float TEXT_SIZE = 16f;
 	/** Locked height the text floats above each NPC's model top, in local units. */
@@ -75,22 +74,21 @@ class ClanTurfBarkOverlay extends Overlay
 		this.plugin = plugin;
 		this.client = client;
 		setPosition(OverlayPosition.DYNAMIC);
-		setLayer(OverlayLayer.ABOVE_SCENE);
+		// Always on top: barks must sit over NPC models and every other scene element, never behind them.
+		setLayer(OverlayLayer.ALWAYS_ON_TOP);
 	}
 
 	@Override
 	public Dimension render(Graphics2D g)
 	{
-		Map<NPC, ClanTurfPlugin.Bark> barks = plugin.getBarks();
+		List<ClanTurfPlugin.Bark> barks = plugin.getBarks();
 		if (barks.isEmpty())
 		{
 			return null;
 		}
 
 		long now = System.currentTimeMillis();
-		long duration = plugin.getBarkDurationMs();
-		Color base = plugin.getBarkColor();
-		String clan = plugin.getBarkClan();
+		long fade = plugin.getBarkFadeMs();
 		g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TEXT_SIZE));
 		FontMetrics fm = g.getFontMetrics();
 		int lineH = fm.getHeight();
@@ -100,33 +98,32 @@ class ClanTurfBarkOverlay extends Overlay
 		LocalPoint me = local == null ? null : local.getLocalLocation();
 
 		// Phase 1: collect visible barks with a stable depth key (distance to the player). Sorting by
-		// depth - instead of the map's arbitrary order - keeps the stacking from reshuffling every frame.
+		// depth - instead of an arbitrary order - keeps the stacking from reshuffling every frame.
 		List<Item> items = new ArrayList<>();
-		for (Map.Entry<NPC, ClanTurfPlugin.Bark> e : barks.entrySet())
+		for (ClanTurfPlugin.Bark bark : barks)
 		{
-			NPC npc = e.getKey();
-			ClanTurfPlugin.Bark bark = e.getValue();
-			if (npc == null || bark == null)
+			NPC npc = bark.npc;
+			if (npc == null || now < bark.revealAt || now >= bark.expireAt)
 			{
-				continue;
+				continue; // not yet revealed, or fully expired
 			}
-			// Staggered reveal: a bark is invisible until its own reveal time, then lives for duration.
+			// Fade in over the first `fade` ms and out over the last `fade` ms, so a superseded chorus
+			// fades away while the new one fades in.
 			long life = now - bark.revealAt;
-			if (life < 0 || life > duration)
-			{
-				continue;
-			}
+			long remaining = bark.expireAt - now;
+			float aIn = life < fade ? (float) life / fade : 1f;
+			float aOut = remaining < fade ? (float) remaining / fade : 1f;
+			float alpha = Math.max(0f, Math.min(aIn, aOut));
 			String text = bark.text;
 			Point anchor = npc.getCanvasTextLocation(g, text, npc.getLogicalHeight() + TEXT_Z_OFFSET);
 			if (anchor == null)
 			{
 				continue;
 			}
-			long remaining = duration - life;
-			float alpha = remaining >= FADE_MS ? 1f : Math.max(0f, (float) remaining / FADE_MS);
 			LocalPoint lp = npc.getLocalLocation();
 			int dist = (me != null && lp != null) ? lp.distanceTo(me) : Integer.MAX_VALUE;
-			items.add(new Item(text, anchor.getX(), anchor.getY(), alpha, dist, clanMask(text, clan)));
+			items.add(new Item(text, anchor.getX(), anchor.getY(), alpha, dist, bark.color,
+					clanMask(text, bark.clan)));
 		}
 		// Nearest first: the front NPC keeps its natural height, farther ones get lifted above it.
 		items.sort(Comparator.comparingInt(it -> it.dist));
@@ -136,7 +133,8 @@ class ClanTurfBarkOverlay extends Overlay
 		for (Item it : items)
 		{
 			int width = fm.stringWidth(it.text);
-			Rectangle box = new Rectangle(it.x - 2, it.y - ascent, width + 4, lineH);
+			int cell = lineH + LINE_GAP;
+			Rectangle box = new Rectangle(it.x - 2, it.y - ascent, width + 4, cell);
 			int guard = 0;
 			boolean moved = true;
 			while (moved && guard++ < 16)
@@ -146,8 +144,8 @@ class ClanTurfBarkOverlay extends Overlay
 				{
 					if (box.intersects(b))
 					{
-						box.y -= lineH;
-						it.y -= lineH;
+						box.y -= cell;
+						it.y -= cell;
 						moved = true;
 						break;
 					}
@@ -163,7 +161,7 @@ class ClanTurfBarkOverlay extends Overlay
 			Item it = items.get(idx);
 			int a = Math.round(255 * it.alpha);
 			Color plain = new Color(YELLOW.getRed(), YELLOW.getGreen(), YELLOW.getBlue(), a);
-			Color clanColor = new Color(base.getRed(), base.getGreen(), base.getBlue(), a);
+			Color clanColor = new Color(it.color.getRed(), it.color.getGreen(), it.color.getBlue(), a);
 			Color shadow = new Color(0, 0, 0, Math.round(180 * it.alpha));
 			int x = it.x;
 			for (int i = 0; i < it.text.length(); i++)
@@ -189,15 +187,17 @@ class ClanTurfBarkOverlay extends Overlay
 		private int y;
 		private final float alpha;
 		private final int dist;
+		private final Color color;
 		private final boolean[] mask;
 
-		private Item(String text, int x, int y, float alpha, int dist, boolean[] mask)
+		private Item(String text, int x, int y, float alpha, int dist, Color color, boolean[] mask)
 		{
 			this.text = text;
 			this.x = x;
 			this.y = y;
 			this.alpha = alpha;
 			this.dist = dist;
+			this.color = color;
 			this.mask = mask;
 		}
 	}

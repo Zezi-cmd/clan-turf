@@ -32,14 +32,18 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.Window;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -53,11 +57,13 @@ import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import net.runelite.client.ui.ColorScheme;
@@ -65,6 +71,7 @@ import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.LinkBrowser;
 
 /**
@@ -74,30 +81,55 @@ import net.runelite.client.util.LinkBrowser;
  */
 class ClanTurfPanel extends PluginPanel
 {
+	// Font hierarchy matched to the Emote Wheel panel: bold 20 title, bold 17 orange section headers.
+	private static final Font TITLE_FONT = FontManager.getRunescapeBoldFont().deriveFont(20f);
+	private static final Font HEADER_FONT = FontManager.getRunescapeBoldFont().deriveFont(17f);
+	/** Faint gold left-bar shown while hovering a paint-as row - a low-opacity brand orange, so it
+	 * reads as a dimmer version of the selected row's solid bar. */
+	private static final Color HOVER_BAR = new Color(
+			ColorScheme.BRAND_ORANGE.getRed(), ColorScheme.BRAND_ORANGE.getGreen(),
+			ColorScheme.BRAND_ORANGE.getBlue(), 110);
+
+	// Native RuneLite icons (rename pencil + the Screen Markers confirm/cancel set), so the row's edit,
+	// confirm and remove buttons all match. Drawn pencil is only a fallback if a resource ever moves.
+	private static final Icon PENCIL_ICON = loadIcon("/net/runelite/client/plugins/config/mdi_rename.png");
+	private static final Icon CHECK_ICON =
+			loadIcon("/net/runelite/client/plugins/screenmarkers/confirm_icon.png");
+	private static final Icon CLOSE_ICON =
+			loadIcon("/net/runelite/client/plugins/screenmarkers/cancel_icon.png");
+
 	private final JLabel header = new JLabel();
 	private final JLabel headline = new JLabel();
 	private final JLabel clanHint = new JLabel();
 	private final Leaderboard board = new Leaderboard(this::openColorPicker);
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
-	private final JButton clearOfflineBtn = new JButton("Clear all tiles");
-	private final JButton serverToggleBtn = new JButton();
+	private final StyledButton clearOfflineBtn = new StyledButton("Clear all tiles", 30);
+	private final StyledButton serverToggleBtn = new StyledButton("Online", 30);
 	private final IntConsumer onInvade;
 	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
 	private final ColorPickerManager colorPickerManager;
 	private final BiConsumer<String, Color> onClanColorChosen; // (clan, chosen color) -> plugin persists
 	private final Consumer<Boolean> onSetSlug;   // offline Full Slug toggle -> plugin persists
 	private final Consumer<Boolean> onSetEraser; // offline Eraser toggle -> plugin persists
-	private final JButton eraserBtn = new JButton();
+	private final StyledButton eraserBtn = new StyledButton("Surrender tiles: Off", 30);
 	private boolean eraserOn;                     // mirrored Eraser state for the button label
 	private final Consumer<String> onAddClan;    // offline: add a test clan to paint as
 	private final Consumer<String> onSelectClan; // offline: paint as this clan
 	private final Consumer<String> onRemoveClan; // offline: remove a test clan
-	private final JButton slugBtn = new JButton();
+	private final BiConsumer<String, String> onRenameClan; // offline: (old, new) rename a test clan
+	private final StyledButton slugBtn = new StyledButton("Full Slug: Off", 30);
 	private final FadePanel sandboxBox = new FadePanel(); // offline-only tools, fades in on going offline
 	private final JPanel paintClansBox = new JPanel();    // the paint-as roster rows
 	private boolean slugOn;                       // mirrored Full Slug state for the button label
 	private boolean serverOn = true;             // current mode, mirrored from the config
+
+	// Headline "Stake" easter egg: click the headline to flip the stake between a percent and a raw
+	// tiles/total count. headlineOwner is the "GE owners: <b>X</b>" prefix while a stake is shown, else null.
+	private boolean stakeAsFraction;
+	private String headlineOwner;
+	private long stakeClaimed;
+	private int stakeTotal;
 
 	// "Community Claims": the all-time community counter, shown only in server mode, with a count-up
 	// animation each time the total ticks up.
@@ -145,7 +177,8 @@ class ClanTurfPanel extends PluginPanel
 	ClanTurfPanel(IntConsumer onInvade, Runnable onClearOffline, Consumer<Boolean> onSetServer,
 			ColorPickerManager colorPickerManager, BiConsumer<String, Color> onClanColorChosen,
 			Consumer<Boolean> onSetSlug, Consumer<String> onAddClan, Consumer<String> onSelectClan,
-			Consumer<String> onRemoveClan, Consumer<Boolean> onSetEraser)
+			Consumer<String> onRemoveClan, BiConsumer<String, String> onRenameClan,
+			Consumer<Boolean> onSetEraser)
 	{
 		this.onInvade = onInvade;
 		this.onSetServer = onSetServer;
@@ -155,6 +188,7 @@ class ClanTurfPanel extends PluginPanel
 		this.onAddClan = onAddClan;
 		this.onSelectClan = onSelectClan;
 		this.onRemoveClan = onRemoveClan;
+		this.onRenameClan = onRenameClan;
 		this.onSetEraser = onSetEraser;
 
 		setLayout(new BorderLayout());
@@ -163,7 +197,7 @@ class ClanTurfPanel extends PluginPanel
 		JPanel top = new JPanel();
 		top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 
-		header.setFont(FontManager.getRunescapeBoldFont());
+		header.setFont(TITLE_FONT);
 		header.setForeground(Color.WHITE);
 		header.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -171,6 +205,37 @@ class ClanTurfPanel extends PluginPanel
 		headline.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		headline.setAlignmentX(Component.LEFT_ALIGNMENT);
 		headline.setBorder(BorderFactory.createEmptyBorder(3, 0, 8, 0));
+		// Easter egg: click the headline while a stake is shown to flip percent <-> tiles/total. Not a
+		// button - just a hand cursor and a slight brighten on hover so it hints at being clickable.
+		headline.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (headlineOwner != null)
+				{
+					stakeAsFraction = !stakeAsFraction;
+					renderHeadline();
+				}
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				if (headlineOwner != null)
+				{
+					headline.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+					headline.setForeground(Color.WHITE);
+				}
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				headline.setCursor(Cursor.getDefaultCursor());
+				headline.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			}
+		});
 
 		// Shown only when the player isn't in a clan (nothing to claim turf for).
 		clanHint.setText("Join a clan to claim turf.");
@@ -182,8 +247,8 @@ class ClanTurfPanel extends PluginPanel
 
 		board.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		battlesHeader.setFont(FontManager.getRunescapeBoldFont());
-		battlesHeader.setForeground(Color.WHITE);
+		battlesHeader.setFont(HEADER_FONT);
+		battlesHeader.setForeground(ColorScheme.BRAND_ORANGE);
 		battlesHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		battlesHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
 
@@ -193,14 +258,10 @@ class ClanTurfPanel extends PluginPanel
 		// Offline-only sandbox control. Always visible so it's easy to find, but only enabled
 		// while the sync server is off, so nobody can ever wipe shared/server turf from here.
 		// Wipes just the current world's local claims.
-		clearOfflineBtn.setFont(FontManager.getRunescapeSmallFont());
-		clearOfflineBtn.setFocusable(false);
-		clearOfflineBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		clearOfflineBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		clearOfflineBtn.setEnabled(false);
 		clearOfflineBtn.setToolTipText(
 				"Wipes this world's local claims. Available only with the sync server turned off.");
-		clearOfflineBtn.addActionListener(e ->
+		clearOfflineBtn.onClick(() ->
 		{
 			if (onClearOffline != null)
 			{
@@ -210,12 +271,14 @@ class ClanTurfPanel extends PluginPanel
 
 		// Online/Offline toggle, sitting next to the Clear button. Flips the sync-server config; the
 		// change swings back through setOfflineControls to relabel this and enable/disable Clear.
-		serverToggleBtn.setFont(FontManager.getRunescapeSmallFont());
-		serverToggleBtn.setFocusable(false);
-		serverToggleBtn.setMaximumSize(new Dimension(72, 28));
+		// Fixed width so it doesn't collapse in the horizontal controls row (styled buttons default to
+		// a zero preferred width, which is fine only for the full-width offline buttons).
+		serverToggleBtn.setPreferredSize(new Dimension(80, 30));
+		serverToggleBtn.setMinimumSize(new Dimension(80, 30));
+		serverToggleBtn.setMaximumSize(new Dimension(80, 30));
 		serverToggleBtn.setToolTipText("Online: your claims sync with every clan. Offline: local practice "
 				+ "only, nothing is sent.");
-		serverToggleBtn.addActionListener(e ->
+		serverToggleBtn.onClick(() ->
 		{
 			if (onSetServer != null)
 			{
@@ -225,8 +288,8 @@ class ClanTurfPanel extends PluginPanel
 
 		// "Community Claims": header, a large animated count, and a thank-you line. Hidden until a real
 		// total arrives (server mode only).
-		globalHeader.setFont(FontManager.getRunescapeBoldFont());
-		globalHeader.setForeground(Color.WHITE);
+		globalHeader.setFont(HEADER_FONT);
+		globalHeader.setForeground(ColorScheme.BRAND_ORANGE);
 		globalHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		globalHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
 
@@ -308,10 +371,10 @@ class ClanTurfPanel extends PluginPanel
 		reportBlurb.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JButton reportBtn = new JButton("Report");
-		reportBtn.setFont(FontManager.getRunescapeSmallFont());
+		reportBtn.setFont(FontManager.getRunescapeFont());
 		reportBtn.setFocusable(false);
 		reportBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reportBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		reportBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, reportBtn.getPreferredSize().height));
 		reportBtn.setToolTipText("Open the Clan Turf bug tracker on GitHub in your browser.");
 		reportBtn.addActionListener(e -> LinkBrowser.browse("https://github.com/Zezi-cmd/clan-turf/issues/new"));
 
@@ -327,19 +390,15 @@ class ClanTurfPanel extends PluginPanel
 
 		// Offline sandbox: creative/practice tools that only make sense with no live turf war. Hidden
 		// online; fades in when you go offline. Phase 1 is the Full Slug paint toggle.
-		JLabel sandboxHeader = new JLabel("Offline Tools:");
-		sandboxHeader.setFont(FontManager.getRunescapeBoldFont());
-		sandboxHeader.setForeground(Color.WHITE);
+		JLabel sandboxHeader = new JLabel("Offline Tools");
+		sandboxHeader.setFont(HEADER_FONT);
+		sandboxHeader.setForeground(ColorScheme.BRAND_ORANGE);
 		sandboxHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		sandboxHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
 
-		slugBtn.setFont(FontManager.getRunescapeSmallFont());
-		slugBtn.setFocusable(false);
-		slugBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		slugBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		slugBtn.setToolTipText("Act on every tile you cross, not just the one you land on (applies to "
 				+ "claiming and to Surrender). Offline only; hides the tiles/hour tracker while on.");
-		slugBtn.addActionListener(e ->
+		slugBtn.onClick(() ->
 		{
 			boolean next = !slugOn;
 			setSlug(next); // optimistic label update
@@ -349,14 +408,10 @@ class ClanTurfPanel extends PluginPanel
 			}
 		});
 
-		eraserBtn.setFont(FontManager.getRunescapeSmallFont());
-		eraserBtn.setFocusable(false);
-		eraserBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		eraserBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 		eraserBtn.setToolTipText("Surrender: your steps erase claimed tiles back to unclaimed instead of "
 				+ "claiming (unclaimed tiles are left alone). Full Slug makes it erase every tile you "
 				+ "cross. Offline only.");
-		eraserBtn.addActionListener(e ->
+		eraserBtn.onClick(() ->
 		{
 			boolean next = !eraserOn;
 			setEraser(next); // optimistic label update
@@ -372,21 +427,16 @@ class ClanTurfPanel extends PluginPanel
 		paintHeader.setFont(FontManager.getRunescapeSmallFont());
 		paintHeader.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		paintHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
-		paintHeader.setBorder(BorderFactory.createEmptyBorder(10, 0, 4, 0));
+		paintHeader.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
 
-		JButton addClanBtn = new JButton("Add clan");
-		addClanBtn.setFont(FontManager.getRunescapeSmallFont());
-		addClanBtn.setFocusable(false);
-		addClanBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		addClanBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-		addClanBtn.setToolTipText("Add a test clan you can paint as (offline sandbox only).");
-		addClanBtn.addActionListener(e ->
+		StyledButton addClanBtn = new StyledButton("Add clan", 30);
+		addClanBtn.setToolTipText("Add a test clan you can paint as (offline sandbox only). "
+				+ "It's auto-named - use the pencil to rename it.");
+		addClanBtn.onClick(() ->
 		{
-			String name = JOptionPane.showInputDialog(this, "Clan name:", "Add clan",
-					JOptionPane.PLAIN_MESSAGE);
-			if (name != null && !name.trim().isEmpty() && onAddClan != null)
+			if (onAddClan != null)
 			{
-				onAddClan.accept(name.trim());
+				onAddClan.accept(null); // null = auto-name (CLAN1, CLAN2, ...)
 			}
 		});
 
@@ -401,6 +451,7 @@ class ClanTurfPanel extends PluginPanel
 		sandboxBox.add(clearOfflineBtn);
 		sandboxBox.add(Box.createVerticalStrut(4));
 		sandboxBox.add(slugBtn);
+		sandboxBox.add(Box.createVerticalStrut(4));
 		sandboxBox.add(eraserBtn);
 		sandboxBox.add(paintHeader);
 		sandboxBox.add(paintClansBox);
@@ -432,9 +483,10 @@ class ClanTurfPanel extends PluginPanel
 		{
 			boolean wasOnline = serverOn;
 			serverOn = !offline;
-			serverToggleBtn.setText(serverOn ? "Online" : "Offline");
-			serverToggleBtn.setForeground(serverOn
+			serverToggleBtn.setLabel(serverOn ? "Online" : "Offline");
+			serverToggleBtn.setLabelColor(serverOn
 					? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
+			battlesHeader.setText(serverOn ? "Active battles" : "Offline battles");
 			clearOfflineBtn.setEnabled(offline);
 			// Offline sandbox tools: shown only offline, faded in on the online -> offline switch.
 			sandboxBox.setVisible(offline);
@@ -461,8 +513,8 @@ class ClanTurfPanel extends PluginPanel
 		SwingUtilities.invokeLater(() ->
 		{
 			slugOn = on;
-			slugBtn.setText(on ? "Full Slug: On" : "Full Slug: Off");
-			slugBtn.setForeground(on ? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
+			slugBtn.setLabel(on ? "Full Slug: On" : "Full Slug: Off");
+			slugBtn.setLabelColor(on ? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
 		});
 	}
 
@@ -472,8 +524,8 @@ class ClanTurfPanel extends PluginPanel
 		SwingUtilities.invokeLater(() ->
 		{
 			eraserOn = on;
-			eraserBtn.setText(on ? "Surrender tiles: On" : "Surrender tiles: Off");
-			eraserBtn.setForeground(on ? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
+			eraserBtn.setLabel(on ? "Surrender tiles: On" : "Surrender tiles: Off");
+			eraserBtn.setLabelColor(on ? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
 		});
 	}
 
@@ -483,8 +535,14 @@ class ClanTurfPanel extends PluginPanel
 		SwingUtilities.invokeLater(() ->
 		{
 			paintClansBox.removeAll();
+			boolean first = true;
 			for (String clan : clans)
 			{
+				if (!first)
+				{
+					paintClansBox.add(Box.createVerticalStrut(4)); // even 4px gap between rows
+				}
+				first = false;
 				boolean isReal = realClan != null && clan.equalsIgnoreCase(realClan);
 				boolean isSelected = selected != null && clan.equalsIgnoreCase(selected);
 				paintClansBox.add(paintClanRow(clan, isReal, isSelected));
@@ -501,10 +559,36 @@ class ClanTurfPanel extends PluginPanel
 		row.setOpaque(true);
 		row.setBackground(isSelected ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		// Match the 30px button height so the roster lines up with Add clan and the offline buttons.
+		row.setPreferredSize(new Dimension(0, 30));
+		row.setMinimumSize(new Dimension(0, 30));
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-		row.setBorder(BorderFactory.createEmptyBorder(3, 6, 3, 4));
+		// Selected clan gets a brand-orange bar down its left edge (like the Emote Wheel slots) instead
+		// of an arrow prefix; the unselected bar is the row color, so the text stays aligned either way.
+		setRowBar(row, isSelected ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
 
-		JLabel name = new JLabel((isSelected ? "→ " : "") + clan);
+		// Hover feedback: a faint gold left bar (a low-opacity version of the selected bar) so you can
+		// see which row you're pointing at, instead of the usual full-background highlight. The selected
+		// row keeps its solid bar. getMousePosition avoids flicker when the pointer crosses the buttons.
+		row.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				setRowBar(row, isSelected ? ColorScheme.BRAND_ORANGE : HOVER_BAR);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				if (row.getMousePosition(true) == null)
+				{
+					setRowBar(row, isSelected ? ColorScheme.BRAND_ORANGE : ColorScheme.DARKER_GRAY_COLOR);
+				}
+			}
+		});
+
+		JLabel name = new JLabel(clan);
 		name.setFont(isSelected ? FontManager.getRunescapeBoldFont() : FontManager.getRunescapeFont());
 		name.setForeground(ClanTurfColors.forClan(clan));
 		name.setToolTipText("Paint as " + clan);
@@ -522,13 +606,14 @@ class ClanTurfPanel extends PluginPanel
 		});
 		row.add(name, BorderLayout.CENTER);
 
-		if (!isReal)
+		// Edit/remove buttons show only on the selected test clan, so the roster stays clean; selecting a
+		// row reveals them (the name shifts to make room for the pencil on the left).
+		if (!isReal && isSelected)
 		{
-			JButton remove = new JButton("x");
-			remove.setFont(FontManager.getRunescapeSmallFont());
-			remove.setFocusable(false);
-			remove.setMargin(new Insets(0, 4, 0, 4));
-			remove.setToolTipText("Remove " + clan);
+			// Pencil toggles inline rename: click once to edit (icon becomes a check), then click the
+			// check or press Enter to confirm; Escape cancels. x removes. Real clan has neither button.
+			JButton edit = iconButton(PENCIL_ICON, "Rename " + clan);
+			JButton remove = iconButton(CLOSE_ICON, "Remove " + clan);
 			remove.addActionListener(e ->
 			{
 				if (onRemoveClan != null)
@@ -536,9 +621,159 @@ class ClanTurfPanel extends PluginPanel
 					onRemoveClan.accept(clan);
 				}
 			});
+
+			// Holds the open rename field for this row, or null when not editing.
+			final JTextField[] field = { null };
+			edit.addActionListener(e ->
+			{
+				if (field[0] != null)
+				{
+					// Confirming.
+					String nn = field[0].getText().trim();
+					field[0] = null;
+					edit.setIcon(PENCIL_ICON);
+					edit.setToolTipText("Rename " + clan);
+					if (onRenameClan != null && !nn.isEmpty())
+					{
+						onRenameClan.accept(clan, nn); // renames + rebuilds the roster
+					}
+					else
+					{
+						restoreLabel(row, name);
+					}
+					return;
+				}
+				// Entering edit mode: name -> text field, pencil -> check.
+				JTextField tf = new JTextField(clan);
+				tf.setFont(FontManager.getRunescapeFont());
+				tf.setForeground(Color.WHITE);
+				tf.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+				tf.setCaretColor(Color.WHITE);
+				tf.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 2));
+				field[0] = tf;
+				row.remove(name);
+				row.add(tf, BorderLayout.CENTER);
+				row.revalidate();
+				row.repaint();
+				edit.setIcon(CHECK_ICON);
+				edit.setToolTipText("Confirm rename");
+				SwingUtilities.invokeLater(() ->
+				{
+					tf.requestFocusInWindow();
+					tf.selectAll();
+				});
+				tf.addActionListener(ev -> edit.doClick()); // Enter = click the check
+				tf.addKeyListener(new KeyAdapter()
+				{
+					@Override
+					public void keyPressed(KeyEvent ke)
+					{
+						if (ke.getKeyCode() == KeyEvent.VK_ESCAPE)
+						{
+							field[0] = null;
+							edit.setIcon(PENCIL_ICON);
+							edit.setToolTipText("Rename " + clan);
+							restoreLabel(row, name);
+						}
+					}
+				});
+			});
+
+			// Edit pencil on the left of the name, remove x on the right.
+			row.add(edit, BorderLayout.WEST);
 			row.add(remove, BorderLayout.EAST);
 		}
 		return row;
+	}
+
+	/** Loads a native RuneLite icon by classpath path, falling back to a drawn pencil if it's missing. */
+	private static Icon loadIcon(String path)
+	{
+		BufferedImage img = ImageUtil.loadImageResource(ClanTurfPanel.class, path);
+		return img != null ? new ImageIcon(img) : makePencilIcon();
+	}
+
+	/** A fixed-size, flat (no background) square icon button that shows just an outline on hover. */
+	private static JButton iconButton(Icon icon, String tooltip)
+	{
+		JButton b = new JButton(icon);
+		b.setFocusable(false);
+		b.setToolTipText(tooltip);
+		b.setContentAreaFilled(false); // no button background - just the icon
+		b.setMargin(new Insets(0, 0, 0, 0));
+		b.setBorder(BorderFactory.createEmptyBorder(1, 1, 1, 1));
+		Dimension d = new Dimension(22, 22);
+		b.setPreferredSize(d);
+		b.setMinimumSize(d);
+		b.setMaximumSize(d);
+		// Just an outline on hover (same 1px inset, so the icon doesn't shift).
+		b.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				b.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				b.setBorder(BorderFactory.createEmptyBorder(1, 1, 1, 1));
+			}
+		});
+		return b;
+	}
+
+	/** Fallback pencil, drawn only if the native RuneLite edit icon resource can't be found. */
+	private static Icon makePencilIcon()
+	{
+		int s = 12;
+		BufferedImage img = new BufferedImage(s, s, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = img.createGraphics();
+		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setColor(ColorScheme.LIGHT_GRAY_COLOR);
+		g.setStroke(new BasicStroke(1.6f));
+		g.drawLine(2, 10, 8, 4);  // pencil body
+		g.drawLine(8, 4, 10, 2);  // toward the tip
+		g.drawLine(2, 10, 3, 11); // eraser end
+		g.dispose();
+		return new ImageIcon(img);
+	}
+
+	/** Renders the GE-owners headline with the stake as a percent, or as tiles/total when toggled. */
+	private void renderHeadline()
+	{
+		if (headlineOwner == null)
+		{
+			return;
+		}
+		String stake = stakeAsFraction
+				? stakeClaimed + " / " + stakeTotal
+				: String.format("%.1f", stakeTotal > 0 ? stakeClaimed * 100.0 / stakeTotal : 0.0) + "% Stake";
+		headline.setText("<html>" + headlineOwner + " &nbsp;·&nbsp; " + stake + "</html>");
+	}
+
+	/** Sets a paint-as row's left bar to the given color (solid orange selected, faint gold on hover). */
+	private static void setRowBar(JPanel row, Color barColor)
+	{
+		row.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createMatteBorder(0, 3, 0, 0, barColor),
+				BorderFactory.createEmptyBorder(3, 6, 3, 4)));
+		row.repaint();
+	}
+
+	/** Put the clan's name label back in the row's center (rename canceled or rejected). */
+	private void restoreLabel(JPanel row, JLabel name)
+	{
+		BorderLayout bl = (BorderLayout) row.getLayout();
+		Component center = bl.getLayoutComponent(BorderLayout.CENTER);
+		if (center != null)
+		{
+			row.remove(center);
+		}
+		row.add(name, BorderLayout.CENTER);
+		row.revalidate();
+		row.repaint();
 	}
 
 	void showEmpty(String message)
@@ -546,6 +781,7 @@ class ClanTurfPanel extends PluginPanel
 		SwingUtilities.invokeLater(() ->
 		{
 			header.setText("Clan Turf");
+			headlineOwner = null; // no stake shown in the empty state, so clicking does nothing
 			headline.setText(message);
 			clanHint.setVisible(false);
 			board.setData(new ArrayList<>(), 0, null);
@@ -765,9 +1001,9 @@ class ClanTurfPanel extends PluginPanel
 		Map<String, Long> counts = claims.stream()
 				.collect(Collectors.groupingBy(ClanTurfPoint::getClanName, Collectors.counting()));
 
-		// Sticky, stable order so tied clans hold their slot instead of shuffling when a new clan
-		// arrives or ties them. The committed owner still wins ties for #1 (matches the boundary);
-		// among the rest, a clan only passes another by STRICTLY out-tiling it. Reset per world.
+		// Rank by tiles held: whoever has the most is #1, so out-tiling a rival puts you on top even
+		// before the debounced owner flip catches up. A tie is broken in the committed owner's favor
+		// (matches the boundary), then by the sticky base order so tied clans don't shuffle. Per world.
 		if (world != boardOrderWorld)
 		{
 			boardOrderWorld = world;
@@ -776,13 +1012,18 @@ class ClanTurfPanel extends PluginPanel
 		List<String> base = stickyBase(counts.keySet(), counts);
 		base.sort((a, b) ->
 		{
+			int byTiles = Long.compare(counts.get(b), counts.get(a));
+			if (byTiles != 0)
+			{
+				return byTiles; // most tiles first
+			}
 			boolean ac = a.equalsIgnoreCase(committedLeader);
 			boolean bc = b.equalsIgnoreCase(committedLeader);
 			if (ac != bc)
 			{
-				return ac ? -1 : 1;
+				return ac ? -1 : 1; // tie: committed owner holds #1
 			}
-			return Long.compare(counts.get(b), counts.get(a)); // stable: ties keep the sticky base
+			return 0; // full tie: keep the stable sticky base order
 		});
 		boardOrder.clear();
 		boardOrder.addAll(base);
@@ -823,23 +1064,26 @@ class ClanTurfPanel extends PluginPanel
 					Color oc = ClanTurfColors.forClan(currentBattle.getOwner());
 					String ohex = String.format("%02x%02x%02x",
 							oc.getRed(), oc.getGreen(), oc.getBlue());
-					double pct = currentBattle.getTotalTiles() > 0
-							? currentBattle.getOwnerTiles() * 100.0 / currentBattle.getTotalTiles() : 0.0;
-					headline.setText("<html>GE owners: <b style='color:#" + ohex + "'>"
-							+ escape(currentBattle.getOwner()) + "</b> &nbsp;·&nbsp; "
-							+ String.format("%.1f", pct) + "% Stake</html>");
+					headlineOwner = "GE owners: <b style='color:#" + ohex + "'>"
+							+ escape(currentBattle.getOwner()) + "</b>";
+					stakeClaimed = currentBattle.getOwnerTiles();
+					stakeTotal = currentBattle.getTotalTiles();
+					renderHeadline();
 				}
 				else if (status == ClanTurfStore.ConnectionStatus.CONNECTING)
 				{
 					// Cold start: the server hasn't answered yet, so don't imply the GE is empty.
+					headlineOwner = null;
 					headline.setText("Connecting to the sync server…");
 				}
 				else if (status == ClanTurfStore.ConnectionStatus.OFFLINE)
 				{
+					headlineOwner = null;
 					headline.setText("Sync server unreachable - retrying.");
 				}
 				else
 				{
+					headlineOwner = null;
 					headline.setText("No tiles claimed yet - walk the GE.");
 				}
 			}
@@ -848,10 +1092,10 @@ class ClanTurfPanel extends PluginPanel
 				Entry lead = ordered.get(0);
 				String hex = String.format("%02x%02x%02x",
 						lead.color.getRed(), lead.color.getGreen(), lead.color.getBlue());
-				double gePct = totalTiles > 0 ? claimed * 100.0 / totalTiles : 0.0;
-				headline.setText("<html>GE owners: <b style='color:#" + hex + "'>"
-						+ escape(lead.clan) + "</b> &nbsp;·&nbsp; "
-						+ String.format("%.1f", gePct) + "% Stake</html>");
+				headlineOwner = "GE owners: <b style='color:#" + hex + "'>" + escape(lead.clan) + "</b>";
+				stakeClaimed = claimed;
+				stakeTotal = totalTiles;
+				renderHeadline();
 			}
 
 			board.setData(ordered, totalTiles, myClan);
@@ -1442,6 +1686,110 @@ class ClanTurfPanel extends PluginPanel
 					Math.min(255, c.getRed() + amt),
 					Math.min(255, c.getGreen() + amt),
 					Math.min(255, c.getBlue() + amt));
+		}
+	}
+
+	/**
+	 * A rounded, hand-painted button matching the Emote Wheel panel: dark rounded fill that lightens
+	 * on hover, a hover-grow and press-pop, and a centered clan-styled label. Replaces the small stock
+	 * JButtons so the offline tools read as one clean set instead of cramped system buttons.
+	 */
+	private static class StyledButton extends JPanel
+	{
+		private static final Font BUTTON_FONT = FontManager.getRunescapeBoldFont();
+
+		private String label;
+		private Color labelColor = Color.WHITE;
+		private boolean hover;
+		private boolean active = true; // our own enabled flag (JPanel has no visual disabled state)
+		private Runnable onClick;
+
+		StyledButton(String label, int height)
+		{
+			this.label = label;
+			setOpaque(false);
+			setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			setAlignmentX(Component.LEFT_ALIGNMENT);
+			setPreferredSize(new Dimension(0, height));
+			setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+			addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseEntered(MouseEvent e)
+				{
+					if (active)
+					{
+						hover = true;
+						repaint();
+					}
+				}
+
+				@Override
+				public void mouseExited(MouseEvent e)
+				{
+					hover = false;
+					repaint();
+				}
+
+				@Override
+				public void mouseReleased(MouseEvent e)
+				{
+					if (active && contains(e.getPoint()) && onClick != null)
+					{
+						onClick.run();
+					}
+				}
+			});
+		}
+
+		void onClick(Runnable r)
+		{
+			onClick = r;
+		}
+
+		void setLabel(String s)
+		{
+			label = s;
+			repaint();
+		}
+
+		void setLabelColor(Color c)
+		{
+			labelColor = c;
+			repaint();
+		}
+
+		@Override
+		public void setEnabled(boolean b)
+		{
+			super.setEnabled(b);
+			active = b;
+			setCursor(Cursor.getPredefinedCursor(b ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+			repaint();
+		}
+
+		@Override
+		protected void paintComponent(Graphics g)
+		{
+			Graphics2D g2 = (Graphics2D) g.create();
+			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+			if (!active)
+			{
+				g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f));
+			}
+			int w = getWidth();
+			int h = getHeight();
+			g2.setColor(hover && active
+					? ColorScheme.DARKER_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
+			g2.fillRoundRect(0, 0, w - 1, h - 1, 6, 6);
+			g2.setFont(BUTTON_FONT);
+			FontMetrics fm = g2.getFontMetrics();
+			int tx = Math.max(6, (w - fm.stringWidth(label)) / 2);
+			int ty = (h + fm.getAscent() - fm.getDescent()) / 2;
+			g2.setColor(labelColor);
+			g2.drawString(label, tx, ty);
+			g2.dispose();
 		}
 	}
 }

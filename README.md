@@ -67,7 +67,7 @@ Flip the **Online/Offline** toggle at the top of the panel to Offline and Clan T
 - **Surrender tiles** flips your steps into an eraser, wiping claimed tiles back to unclaimed. With Full Slug on it erases everything you cross; off, just the tiles you walk over.
 - **Claim tiles as** lets you add test clans and switch which one you're painting, so you can lay out a whole battle yourself. Recolor any clan by clicking its scoreboard bar; offline picks are saved in a separate list so they never touch your online one.
 
-None of it is sent anywhere or counts toward the live game - it's a local playground.
+![Offline mode](images/configoffline.png)
 
 ## Rally your clan in chat
 
