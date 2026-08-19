@@ -22,7 +22,9 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 ## The crowd reacts
 
-Take the GE while you're standing in it and the whole cast of Grand Exchange NPCs calls it out overhead, each in character. Brugsen Bursen pulls rank as director, Bob Barter talks herbs, the Emblem Trader mutters something ominous, the recruiters cheer for their god, and the clan-portal clerk - a fan of every clan - applauds the win. Each NPC draws at random from its own pool of lines, rendered in the game's overhead yellow with your clan's name picked out in its color. The crowd announces in a stagger rather than all at once, it only fires on an ownership flip, and nothing is ever posted to the chat box. Toggle it with **NPC takeover text**.
+Take the GE while you're standing in it and the whole cast of Grand Exchange NPCs calls it out overhead, each with lines that fit their character. The chatter appears in the game's overhead yellow with your clan's name picked out in its color, announced in a stagger rather than all at once. It only fires on an ownership flip, and nothing is ever posted to the chat box. Toggle it with **NPC takeover text**.
+
+![NPC takeover text](images/npcbark.png)
 
 ## Pre-claimed pockets
 

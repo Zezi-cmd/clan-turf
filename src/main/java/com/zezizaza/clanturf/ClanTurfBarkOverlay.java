@@ -28,10 +28,17 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import javax.inject.Inject;
+import net.runelite.api.Client;
 import net.runelite.api.NPC;
+import net.runelite.api.Player;
 import net.runelite.api.Point;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -60,11 +67,13 @@ class ClanTurfBarkOverlay extends Overlay
 	private static final Color YELLOW = Color.YELLOW;
 
 	private final ClanTurfPlugin plugin;
+	private final Client client;
 
 	@Inject
-	ClanTurfBarkOverlay(ClanTurfPlugin plugin)
+	ClanTurfBarkOverlay(ClanTurfPlugin plugin, Client client)
 	{
 		this.plugin = plugin;
+		this.client = client;
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_SCENE);
 	}
@@ -82,10 +91,17 @@ class ClanTurfBarkOverlay extends Overlay
 		long duration = plugin.getBarkDurationMs();
 		Color base = plugin.getBarkColor();
 		String clan = plugin.getBarkClan();
-		int zOffset = TEXT_Z_OFFSET;
 		g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TEXT_SIZE));
 		FontMetrics fm = g.getFontMetrics();
+		int lineH = fm.getHeight();
+		int ascent = fm.getAscent();
 
+		Player local = client.getLocalPlayer();
+		LocalPoint me = local == null ? null : local.getLocalLocation();
+
+		// Phase 1: collect visible barks with a stable depth key (distance to the player). Sorting by
+		// depth - instead of the map's arbitrary order - keeps the stacking from reshuffling every frame.
+		List<Item> items = new ArrayList<>();
 		for (Map.Entry<NPC, ClanTurfPlugin.Bark> e : barks.entrySet())
 		{
 			NPC npc = e.getKey();
@@ -100,36 +116,90 @@ class ClanTurfBarkOverlay extends Overlay
 			{
 				continue;
 			}
-			long remaining = duration - life;
-			float alpha = remaining >= FADE_MS ? 1f : Math.max(0f, (float) remaining / FADE_MS);
-			int a = Math.round(255 * alpha);
-			Color plain = new Color(YELLOW.getRed(), YELLOW.getGreen(), YELLOW.getBlue(), a);
-			Color clanColor = new Color(base.getRed(), base.getGreen(), base.getBlue(), a);
-			Color shadow = new Color(0, 0, 0, Math.round(180 * alpha));
-
 			String text = bark.text;
-			boolean[] clanMask = clanMask(text, clan);
-			Point anchor = npc.getCanvasTextLocation(g, text, npc.getLogicalHeight() + zOffset);
+			Point anchor = npc.getCanvasTextLocation(g, text, npc.getLogicalHeight() + TEXT_Z_OFFSET);
 			if (anchor == null)
 			{
 				continue;
 			}
-			// getCanvasTextLocation centers the string on the NPC, so anchor.x is the left edge.
-			int x = anchor.getX();
-			int y = anchor.getY();
-			for (int i = 0; i < text.length(); i++)
+			long remaining = duration - life;
+			float alpha = remaining >= FADE_MS ? 1f : Math.max(0f, (float) remaining / FADE_MS);
+			LocalPoint lp = npc.getLocalLocation();
+			int dist = (me != null && lp != null) ? lp.distanceTo(me) : Integer.MAX_VALUE;
+			items.add(new Item(text, anchor.getX(), anchor.getY(), alpha, dist, clanMask(text, clan)));
+		}
+		// Nearest first: the front NPC keeps its natural height, farther ones get lifted above it.
+		items.sort(Comparator.comparingInt(it -> it.dist));
+
+		// Phase 2: lift each line above any nearer one it would overlap, so clustered NPCs stack.
+		List<Rectangle> boxes = new ArrayList<>();
+		for (Item it : items)
+		{
+			int width = fm.stringWidth(it.text);
+			Rectangle box = new Rectangle(it.x - 2, it.y - ascent, width + 4, lineH);
+			int guard = 0;
+			boolean moved = true;
+			while (moved && guard++ < 16)
 			{
-				String ch = String.valueOf(text.charAt(i));
+				moved = false;
+				for (Rectangle b : boxes)
+				{
+					if (box.intersects(b))
+					{
+						box.y -= lineH;
+						it.y -= lineH;
+						moved = true;
+						break;
+					}
+				}
+			}
+			boxes.add(box);
+		}
+
+		// Phase 3: draw far-to-near so the nearest NPC's line lands on top. Yellow with the clan name in
+		// the clan color, plus the wave and a shadow.
+		for (int idx = items.size() - 1; idx >= 0; idx--)
+		{
+			Item it = items.get(idx);
+			int a = Math.round(255 * it.alpha);
+			Color plain = new Color(YELLOW.getRed(), YELLOW.getGreen(), YELLOW.getBlue(), a);
+			Color clanColor = new Color(base.getRed(), base.getGreen(), base.getBlue(), a);
+			Color shadow = new Color(0, 0, 0, Math.round(180 * it.alpha));
+			int x = it.x;
+			for (int i = 0; i < it.text.length(); i++)
+			{
+				String ch = String.valueOf(it.text.charAt(i));
 				int dy = (int) Math.round(
 						Math.sin(now * WAVE_SPEED + i * WAVE_SPACING) * WAVE_AMPLITUDE);
 				g.setColor(shadow);
-				g.drawString(ch, x + 1, y + dy + 1);
-				g.setColor(clanMask[i] ? clanColor : plain);
-				g.drawString(ch, x, y + dy);
+				g.drawString(ch, x + 1, it.y + dy + 1);
+				g.setColor(it.mask[i] ? clanColor : plain);
+				g.drawString(ch, x, it.y + dy);
 				x += fm.stringWidth(ch);
 			}
 		}
 		return null;
+	}
+
+	/** A bark resolved to a screen position for this frame; {@code y} is adjusted by overlap-stacking. */
+	private static final class Item
+	{
+		private final String text;
+		private final int x;
+		private int y;
+		private final float alpha;
+		private final int dist;
+		private final boolean[] mask;
+
+		private Item(String text, int x, int y, float alpha, int dist, boolean[] mask)
+		{
+			this.text = text;
+			this.x = x;
+			this.y = y;
+			this.alpha = alpha;
+			this.dist = dist;
+			this.mask = mask;
+		}
 	}
 
 	/** Marks which characters of {@code text} fall inside an occurrence of the clan name, so those are
