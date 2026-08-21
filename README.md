@@ -32,6 +32,12 @@ Parts of the Grand Exchange aren't walkable - the stools, the stalls, the walls,
 
 ![Pre-claims](images/preclaims.png)
 
+## The war on the map
+
+The GE is tinted on your minimap in the current owner's color. On the world map, the GE is outlined and filled with the owner's color and clan name, letting you see who controls it without being there. Multi-word clan names stack one word per line.
+
+![The war on the map](images/maps.png)
+
 ## Live scoreboard
 
 The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds.
@@ -43,6 +49,10 @@ The side panel ranks every clan on your world by tiles held, with each clan's sh
 See which worlds are contested, with the leading clan and closest rival shown for each world. Click **Invade** to hop to a rival's world, or **Defend** to jump to one your clan already holds.
 
 ![Active battles](images/activebattles.png)
+
+## Rally your clan in chat
+
+Type `!defend 307` or `!invade 420` in clan chat (`!def` and `!inv` also work) to send a formatted rally call in the target clan's color. Commands are validated against the live board so only real targets are announced.
 
 ## Community Claims
 
@@ -58,6 +68,12 @@ Colorblind? A **Colorblind mode** in the settings adjusts every clan color, auto
 
 ![Colorblind](images/colorblind.png)
 
+## Tiles per hour
+
+The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max TPH** in a draggable overlay. It persists across world hops and relogs. Shift + right-click the tracker to **Reset run** or **Reset all**.
+
+![Tiles per hour](images/tph.png)
+
 ## Offline mode
 
 Flip the **Online/Offline** toggle at the top of the panel to Offline and Clan Turf runs local-only: you see just your own claims, nothing is sent, and an **Offline Tools** box opens with a little sandbox to mess around in:
@@ -69,25 +85,9 @@ Flip the **Online/Offline** toggle at the top of the panel to Offline and Clan T
 
 ![Offline mode](images/configoffline.png)
 
-## Rally your clan in chat
-
-Type `!defend 307` or `!invade 420` in clan chat (`!def` and `!inv` also work) to send a formatted rally call in the target clan's color. Commands are validated against the live board so only real targets are announced.
-
-## The war on the map
-
-The GE is tinted on your minimap in the current owner's color. On the world map, the GE is outlined and filled with the owner's color and clan name, letting you see who controls it without being there. Multi-word clan names stack one word per line.
-
-![The war on the map](images/maps.png)
-
 ## Daily reset
 
 All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give you time to finish a battle, while the reset dissolves tiles in a staggered fade.
-
-## Tiles per hour
-
-The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max TPH** in a draggable overlay. It persists across world hops and relogs. Shift + right-click the tracker to **Reset run** or **Reset all**.
-
-![Tiles per hour](images/tph.png)
 
 ## Usage
 
