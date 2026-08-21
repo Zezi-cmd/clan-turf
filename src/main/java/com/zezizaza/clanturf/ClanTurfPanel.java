@@ -52,7 +52,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -106,7 +105,6 @@ class ClanTurfPanel extends PluginPanel
 	private final JPanel battlesBox = new JPanel();
 	private final StyledButton clearOfflineBtn = new StyledButton("Clear all tiles", 30);
 	private final StyledButton serverToggleBtn = new StyledButton("Online", 30);
-	private final IntConsumer onInvade;
 	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
 	private final ColorPickerManager colorPickerManager;
 	private final BiConsumer<String, Color> onClanColorChosen; // (clan, chosen color) -> plugin persists
@@ -168,19 +166,17 @@ class ClanTurfPanel extends PluginPanel
 	private final List<String> boardOrder = new ArrayList<>();
 
 	/**
-	 * @param onInvade           hop to the given world (from an Active battles "Invade"/"Defend" button)
 	 * @param onClearOffline     wipe the current world's local claims (only wired while offline)
 	 * @param onSetServer        turn the sync server on/off (the panel's Online/Offline toggle)
 	 * @param colorPickerManager opens the RuneLite color wheel when a scoreboard bar is clicked
 	 * @param onClanColorChosen  (clan, chosen color) - the plugin persists it (own color vs color list)
 	 */
-	ClanTurfPanel(IntConsumer onInvade, Runnable onClearOffline, Consumer<Boolean> onSetServer,
+	ClanTurfPanel(Runnable onClearOffline, Consumer<Boolean> onSetServer,
 			ColorPickerManager colorPickerManager, BiConsumer<String, Color> onClanColorChosen,
 			Consumer<Boolean> onSetSlug, Consumer<String> onAddClan, Consumer<String> onSelectClan,
 			Consumer<String> onRemoveClan, BiConsumer<String, String> onRenameClan,
 			Consumer<Boolean> onSetEraser)
 	{
-		this.onInvade = onInvade;
 		this.onSetServer = onSetServer;
 		this.colorPickerManager = colorPickerManager;
 		this.onClanColorChosen = onClanColorChosen;
@@ -1222,8 +1218,7 @@ class ClanTurfPanel extends PluginPanel
 	private FadePanel battleRow(ClanTurfBattle b, String myClan, int currentWorld)
 	{
 		FadePanel row = new FadePanel(new BorderLayout(6, 0));
-		boolean mine = b.getOwner() != null && b.getOwner().equalsIgnoreCase(myClan);
-		boolean current = b.getWorld() == currentWorld; // the world you're on: no button, larger text
+		boolean current = b.getWorld() == currentWorld; // the world you're on: larger text
 		// Every row gets a left accent bar in the owning clan's color (a quick "who holds this world"
 		// cue), with a divider underneath.
 		javax.swing.border.Border divider =
@@ -1278,7 +1273,7 @@ class ClanTurfPanel extends PluginPanel
 			return row;
 		}
 
-		// Other worlds: a single compact label plus the Invade/Defend button.
+		// Other worlds: a single compact info label (the world's in the label, hop to it yourself).
 		String worldTag = "<b>W" + b.getWorld() + "</b>";
 		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
 				+ "</span>&nbsp;" + b.getOwnerTiles();
@@ -1301,18 +1296,6 @@ class ClanTurfPanel extends PluginPanel
 		info.setFont(FontManager.getRunescapeSmallFont());
 		info.setForeground(Color.WHITE);
 		row.add(info, BorderLayout.CENTER);
-
-		JButton hop = new JButton(mine ? "Defend" : "Invade");
-		hop.setFont(FontManager.getRunescapeSmallFont());
-		hop.setFocusable(false);
-		hop.addActionListener(e ->
-		{
-			if (onInvade != null)
-			{
-				onInvade.accept(b.getWorld());
-			}
-		});
-		row.add(hop, BorderLayout.EAST);
 		return row;
 	}
 

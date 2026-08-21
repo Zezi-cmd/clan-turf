@@ -59,14 +59,11 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
-import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.audio.AudioPlayer;
-import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.OverlayMenuClicked;
 import net.runelite.client.eventbus.Subscribe;
-import net.runelite.client.game.WorldService;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -75,9 +72,6 @@ import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
-import net.runelite.client.util.WorldUtil;
-import net.runelite.http.api.worlds.World;
-import net.runelite.http.api.worlds.WorldResult;
 
 @Slf4j
 @PluginDescriptor(
@@ -88,12 +82,10 @@ import net.runelite.http.api.worlds.WorldResult;
 public class ClanTurfPlugin extends Plugin
 {
 	@Inject private Client client;
-	@Inject private ClientThread clientThread;
 	@Inject private ScheduledExecutorService executor;
 	@Inject private OverlayManager overlayManager;
 	@Inject private ClientToolbar clientToolbar;
 	@Inject private ColorPickerManager colorPickerManager;
-	@Inject private WorldService worldService;
 	@Inject private ConfigManager configManager;
 	@Inject private ClanTurfConfig config;
 	@Inject private ClanTurfOverlay overlay;
@@ -364,12 +356,6 @@ public class ClanTurfPlugin extends Plugin
 	private volatile Color animFrom;
 	private volatile Color animTo;
 
-	// "Invade" world-hop: the same quick-hop dance the World Hopper plugin uses. We stage a target
-	// world, open the world switcher, and hop once it's up; a game message clears it if we can't.
-	private net.runelite.api.World quickHopTargetWorld;
-	private int hopAttempts;
-	private static final int HOP_MAX_ATTEMPTS = 3;
-
 	@Provides
 	ClanTurfConfig provideConfig(ConfigManager cm)
 	{
@@ -379,7 +365,7 @@ public class ClanTurfPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		panel = new ClanTurfPanel(this::invade, this::clearOfflineTiles, this::setUseServer,
+		panel = new ClanTurfPanel(this::clearOfflineTiles, this::setUseServer,
 				colorPickerManager, this::onClanColorChosen, this::setSlug,
 				this::addSandboxClan, this::selectPaintClan, this::removeSandboxClan,
 				this::renameSandboxClan, this::setEraser);
@@ -572,8 +558,6 @@ public class ClanTurfPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick tick)
 	{
-		driveHop(); // progress any pending "Invade" world-hop, even mid-relog
-
 		Player local = client.getLocalPlayer();
 		if (local == null)
 		{
@@ -1423,75 +1407,9 @@ public class ClanTurfPlugin extends Plugin
 		pushPaintClans();
 	}
 
-	/** Invade a battle's world: stage a quick-hop. Called from the panel on the Swing EDT. */
-	void invade(int worldId)
-	{
-		clientThread.invoke(() -> beginHop(worldId));
-	}
-
-	/** Builds the hop target from the world list. Must run on the client thread. */
-	private void beginHop(int worldId)
-	{
-		WorldResult worldResult = worldService.getWorlds();
-		if (worldResult == null)
-		{
-			return;
-		}
-		World world = worldResult.findWorld(worldId);
-		if (world == null)
-		{
-			return;
-		}
-
-		net.runelite.api.World rsWorld = client.createWorld();
-		rsWorld.setActivity(world.getActivity());
-		rsWorld.setAddress(world.getAddress());
-		rsWorld.setId(world.getId());
-		rsWorld.setPlayerCount(world.getPlayers());
-		rsWorld.setLocation(world.getLocation());
-		rsWorld.setTypes(WorldUtil.toWorldTypes(world.getTypes()));
-
-		if (client.getGameState() == GameState.LOGIN_SCREEN)
-		{
-			client.changeWorld(rsWorld);
-			return;
-		}
-
-		quickHopTargetWorld = rsWorld;
-		hopAttempts = 0;
-	}
-
-	/** Progresses a staged hop each tick: open the world switcher, then hop once it's up. */
-	private void driveHop()
-	{
-		if (quickHopTargetWorld == null)
-		{
-			return;
-		}
-		if (client.getWidget(InterfaceID.Worldswitcher.BUTTONS) == null)
-		{
-			client.openWorldHopper();
-			if (++hopAttempts >= HOP_MAX_ATTEMPTS)
-			{
-				resetHop(); // give up rather than spin forever
-			}
-		}
-		else
-		{
-			client.hopToWorld(quickHopTargetWorld);
-			resetHop();
-		}
-	}
-
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
-		if (event.getType() == ChatMessageType.GAMEMESSAGE
-				&& "Please finish what you're doing before using the World Switcher.".equals(event.getMessage()))
-		{
-			resetHop();
-			return;
-		}
 		handleClanCommand(event);
 	}
 
@@ -1658,11 +1576,6 @@ public class ClanTurfPlugin extends Plugin
 		return String.format("%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
 	}
 
-	private void resetHop()
-	{
-		hopAttempts = 0;
-		quickHopTargetWorld = null;
-	}
 
 	private void refreshClaims()
 	{

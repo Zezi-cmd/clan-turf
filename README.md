@@ -46,7 +46,7 @@ The side panel ranks every clan on your world by tiles held, with each clan's sh
 
 ## Active battles
 
-See which worlds are contested, with the leading clan and closest rival shown for each world. Click **Invade** to hop to a rival's world, or **Defend** to jump to one your clan already holds.
+See which worlds are contested, with the leading clan and closest rival shown for each world, so you know where to head next.
 
 ![Active battles](images/activebattles.png)
 
