@@ -142,6 +142,7 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 - **Reset countdown** - Show the countdown and clan warnings before the daily reset.
 - **Tiles/hour tracker** - Show the tiles-claimed and TPH overlay. Shift + right-click to reset.
 - **Colorblind mode** - Daltonize all clan colors for easier separation: protanopia, deuteranopia, or tritanopia.
+- **Show update messages** - Print a short changelog in the chat box the first time you log in after the plugin updates.
 
 ![Extras settings](images/configextras.png)
 

@@ -395,6 +395,19 @@ public interface ClanTurfConfig extends Config
 		return ColorblindMode.NONE;
 	}
 
+	@ConfigItem(
+			keyName = "showUpdateMessage",
+			section = extrasSection,
+			name = "Show update messages",
+			description = "Print a short changelog in the chat box the first time you log in "
+					+ "after the plugin updates.",
+			position = 18
+	)
+	default boolean showUpdateMessage()
+	{
+		return true;
+	}
+
 	// -------------------------------------------------------------- hidden / internal
 	// Kept as config (so values persist) but not shown in the settings panel. The animation
 	// values below were dialed in during development and are now baked in.
@@ -635,6 +648,13 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(keyName = "lastClan", name = "Last clan", description = "Internal.",
 			position = 133, hidden = true)
 	default String lastClan()
+	{
+		return "";
+	}
+
+	@ConfigItem(keyName = "lastUpdateSeen", name = "", description = "",
+			position = 134, hidden = true)
+	default String lastUpdateSeen()
 	{
 		return "";
 	}

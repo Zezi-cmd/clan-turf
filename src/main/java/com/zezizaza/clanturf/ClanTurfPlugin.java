@@ -282,6 +282,27 @@ public class ClanTurfPlugin extends Plugin
 	private long clanlessSinceMs;
 	private static final long CLAN_GRACE_MS = 6000L;
 
+	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
+	 *  differs gets these lines printed once on their next login. */
+	private static final String UPDATE_ID = "v1";
+	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
+	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
+	private static final boolean ALWAYS_SHOW_UPDATE = false;
+	/** Header label. Kept as "[Update]" for now. Set to null in a future release to auto-use the
+	 *  Hub-built jar version instead (see updateMessage()). */
+	private static final String UPDATE_LABEL = "[Update]";
+	private static final String[] UPDATE_LINES = {
+		"Your clan now loads instantly on login - claim right away, no more 'join a clan' first.",
+		"New: update notes like this show in chat when Clan Turf updates. Toggle off in settings.",
+	};
+
+	/** Set when we log in with an unseen update; the changelog fires on the next game tick, since chat
+	 *  isn't ready at the state-change event itself. */
+	private boolean showUpdateNextTick;
+	/** Guards the changelog against re-firing on teleports / POH portals within one login; reset only
+	 *  on LOGIN_SCREEN / HOPPING. */
+	private boolean updateShownThisLogin;
+
 	/** Clans (lower-case) we've locally recolored from the color list, so we can clear them on a change. */
 	private final Set<String> whitelistApplied = new HashSet<>();
 
@@ -403,6 +424,12 @@ public class ClanTurfPlugin extends Plugin
 		ClanTurfColors.setColorblindMode(config.colorblindMode());
 		applyWhitelist();
 		refreshClaims();
+
+		// If the plugin updated while already logged in, queue the changelog for the next tick.
+		if (client.getGameState() == GameState.LOGGED_IN && shouldShowUpdate())
+		{
+			showUpdateNextTick = true;
+		}
 	}
 
 	@Override
@@ -540,6 +567,14 @@ public class ClanTurfPlugin extends Plugin
 			{
 				serverStore.setOnline(true); // resume syncing now that we're back in-game
 			}
+			if (!updateShownThisLogin && shouldShowUpdate())
+			{
+				showUpdateNextTick = true; // chat isn't ready yet, so fire on the first tick
+			}
+		}
+		else if (state == GameState.HOPPING)
+		{
+			updateShownThisLogin = false; // a hop re-arms the guard (only matters in dev preview mode)
 		}
 		else if (state == GameState.LOGIN_SCREEN)
 		{
@@ -551,6 +586,7 @@ public class ClanTurfPlugin extends Plugin
 			}
 			lastWorld = -1;
 			clanlessSinceMs = 0; // re-grace the clan hint on the next login instead of firing instantly
+			updateShownThisLogin = false;
 			refreshClaims();
 		}
 	}
@@ -558,6 +594,8 @@ public class ClanTurfPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick tick)
 	{
+		maybeShowUpdate();
+
 		Player local = client.getLocalPlayer();
 		if (local == null)
 		{
@@ -1268,11 +1306,18 @@ public class ClanTurfPlugin extends Plugin
 	private String effectiveClanName()
 	{
 		ClanChannel channel = client.getClanChannel();
-		if (channel == null || channel.getName() == null || channel.getName().isEmpty())
+		if (channel != null && channel.getName() != null && !channel.getName().isEmpty())
 		{
-			return null;
+			return channel.getName();
 		}
-		return channel.getName();
+		// The clan channel can read empty for a stretch after login - notably the first login of the day -
+		// even while clan chat already works. Rather than treat a known member as clan-less (blocking
+		// claims and flashing "join a clan" over the connecting message), fall back to the clan we last
+		// saw them in. The live channel takes over the instant it loads, so a clan change still updates
+		// within a tick. Only a player we have never seen in any clan (no saved name) is treated as
+		// clan-less and shown the hint.
+		String last = config.lastClan();
+		return (last == null || last.trim().isEmpty()) ? null : last;
 	}
 
 	/** True once we're confident the player really is clan-less: the clan channel has had time to load
@@ -1280,6 +1325,55 @@ public class ClanTurfPlugin extends Plugin
 	private boolean clanHintDue()
 	{
 		return clanlessSinceMs != 0 && System.currentTimeMillis() - clanlessSinceMs > CLAN_GRACE_MS;
+	}
+
+	/** Prints the update changelog once, on the first tick after login, if it hasn't been shown yet. */
+	private void maybeShowUpdate()
+	{
+		if (!showUpdateNextTick)
+		{
+			return;
+		}
+		showUpdateNextTick = false;
+		if (!shouldShowUpdate())
+		{
+			return;
+		}
+		updateShownThisLogin = true;
+		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", updateMessage(), null);
+		if (!ALWAYS_SHOW_UPDATE)
+		{
+			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lastUpdateSeen", UPDATE_ID);
+		}
+	}
+
+	/** True when this update's changelog has not been shown yet and update messages are enabled. */
+	private boolean shouldShowUpdate()
+	{
+		if (!config.showUpdateMessage())
+		{
+			return false;
+		}
+		return ALWAYS_SHOW_UPDATE || !UPDATE_ID.equals(config.lastUpdateSeen());
+	}
+
+	/** The whole changelog as one gold, multi-line chat message; only the [Update] label is white. */
+	private String updateMessage()
+	{
+		String label = UPDATE_LABEL;
+		if (label == null)
+		{
+			String v = getClass().getPackage().getImplementationVersion();
+			label = (v == null || v.isEmpty()) ? "[Update]" : "v" + v;
+		}
+		String gold = "<col=ff981f>";
+		String white = "<col=ffffff>";
+		StringBuilder sb = new StringBuilder(gold).append("Clan Turf ").append(white).append(label);
+		for (String line : UPDATE_LINES)
+		{
+			sb.append("<br>").append(gold).append("* ").append(line);
+		}
+		return sb.toString();
 	}
 
 	/**
