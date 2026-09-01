@@ -293,6 +293,7 @@ public class ClanTurfPlugin extends Plugin
 	private static final String UPDATE_LABEL = "[Update]";
 	private static final String[] UPDATE_LINES = {
 		"Your clan now loads instantly on login - claim right away, no more 'join a clan' first.",
+		"Fixed a rare disconnect when switching between Online and Offline.",
 		"New: update notes like this show in chat when Clan Turf updates. Toggle off in settings.",
 	};
 
