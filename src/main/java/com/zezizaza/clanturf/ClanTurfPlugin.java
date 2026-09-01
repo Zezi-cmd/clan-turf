@@ -100,7 +100,7 @@ public class ClanTurfPlugin extends Plugin
 	// Local = ConfigManager (your claims only). Server = synced (rivals visible).
 	@Inject private ConfigClanTurfStore localStore;
 	@Inject private HttpClanTurfStore serverStore;
-	private ClanTurfStore store;
+	private volatile ClanTurfStore store;
 
 	private ClanTurfPanel panel;
 	private NavigationButton navButton;
@@ -407,6 +407,11 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.add(worldMapOverlay);
 		overlayManager.add(barkOverlay);
 
+		// Start both stores once, for the plugin's whole lifetime. The server poller is then only
+		// paused/resumed on toggle (see selectStore), never recreated - a recreate-per-toggle
+		// interrupted live requests and could knock the whole client offline.
+		localStore.start();
+		serverStore.start();
 		selectStore();
 
 		lastTile = null;
@@ -442,11 +447,10 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.remove(worldMapOverlay);
 		overlayManager.remove(barkOverlay);
 		clientToolbar.removeNavigation(navButton);
-		if (store != null)
-		{
-			store.setChangeListener(null);
-			store.stop();
-		}
+		serverStore.setChangeListener(null);
+		localStore.setChangeListener(null);
+		serverStore.stop();
+		localStore.stop();
 		visibleClaims = Collections.emptyList();
 		lastTile = null;
 		lastWorld = -1;
@@ -463,12 +467,20 @@ public class ClanTurfPlugin extends Plugin
 	private void selectStore()
 	{
 		store = config.useServer() ? serverStore : localStore;
-		store.start();
 		if (store == localStore)
 		{
 			// Local store is event-driven: repaint when we write. (Server mode polls per tick.)
-			store.setChangeListener(this::refreshClaims);
+			localStore.setChangeListener(this::refreshClaims);
 		}
+		else
+		{
+			serverStore.setChangeListener(null);
+		}
+		// The sync poller is started once in startUp and lives for the whole plugin. Toggling online/
+		// offline only pauses or resumes it - it is never torn down. Recreating the poller on every flip
+		// interrupted in-flight requests and thrashed connections, which could take the whole client
+		// offline. It stays paused unless we are both in online mode AND logged in.
+		serverStore.setOnline(config.useServer() && client.getGameState() == GameState.LOGGED_IN);
 		if (panel != null)
 		{
 			panel.setOfflineControls(!config.useServer());
@@ -511,11 +523,9 @@ public class ClanTurfPlugin extends Plugin
 		// Make "Use sync server" take effect immediately instead of needing a plugin off/on.
 		if ("useServer".equals(key))
 		{
-			if (store != null)
-			{
-				store.setChangeListener(null);
-				store.stop();
-			}
+			// Just switch which store is active and pause/resume the poller - no stop()/start(), so a
+			// rapid toggle can't interrupt live requests or thrash connections (that was dropping the
+			// whole game client).
 			selectStore();
 			leaderInit = false;
 			committedLeader = null;
@@ -563,10 +573,8 @@ public class ClanTurfPlugin extends Plugin
 		GameState state = event.getGameState();
 		if (state == GameState.LOGGED_IN)
 		{
-			if (store == serverStore)
-			{
-				serverStore.setOnline(true); // resume syncing now that we're back in-game
-			}
+			// Resume the poller only if we're in online mode (it stays paused, not stopped, offline).
+			serverStore.setOnline(config.useServer());
 			if (!updateShownThisLogin && shouldShowUpdate())
 			{
 				showUpdateNextTick = true; // chat isn't ready yet, so fire on the first tick
@@ -578,12 +586,9 @@ public class ClanTurfPlugin extends Plugin
 		}
 		else if (state == GameState.LOGIN_SCREEN)
 		{
-			// Logged out to the login/world-select screen: stop all sync and blank the panel so the
+			// Logged out to the login/world-select screen: pause sync and blank the panel so the
 			// scoreboard bars and battles don't linger over the login screen. Login re-drives it all.
-			if (store == serverStore)
-			{
-				serverStore.setOnline(false);
-			}
+			serverStore.setOnline(false);
 			lastWorld = -1;
 			clanlessSinceMs = 0; // re-grace the clan hint on the next login instead of firing instantly
 			updateShownThisLogin = false;
