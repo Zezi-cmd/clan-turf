@@ -27,6 +27,8 @@ package com.zezizaza.clanturf;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * The seam. Everything above this interface (claim detection, overlay, panel) is
@@ -93,6 +95,39 @@ interface ClanTurfStore
 	default long getGlobalClaims()
 	{
 		return 0;
+	}
+
+	/**
+	 * Alliance color for every clan currently in an alliance: clan name -> 6-hex RRGGBB, so the
+	 * overlay can paint allied clans in their shared color. Only the networked store has alliances.
+	 */
+	default Map<String, String> allianceColors()
+	{
+		return Collections.emptyMap();
+	}
+
+	/** The alliance id a clan belongs to (case-insensitive), or null if it isn't in one. */
+	default String allianceIdOf(String clan)
+	{
+		return null;
+	}
+
+	/** Every clan in the same alliance as {@code clan} (including it), or empty if it has none. */
+	default Set<String> alliesOf(String clan)
+	{
+		return Collections.emptySet();
+	}
+
+	/** The display name of a clan's alliance, or null if it isn't in one (or the alliance is unnamed). */
+	default String allianceNameOf(String clan)
+	{
+		return null;
+	}
+
+	/** The clan that created (owns) a clan's alliance, or null. Its Admin+ staff manage the alliance. */
+	default String allianceOwnerClanOf(String clan)
+	{
+		return null;
 	}
 
 	/** Start any background work (e.g. the sync poller). No-op for the local store. */

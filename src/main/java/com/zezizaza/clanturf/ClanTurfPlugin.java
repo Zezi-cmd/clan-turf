@@ -53,6 +53,8 @@ import net.runelite.api.GameState;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.clan.ClanChannel;
+import net.runelite.api.clan.ClanChannelMember;
+import net.runelite.api.clan.ClanRank;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
@@ -284,7 +286,7 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v1";
+	private static final String UPDATE_ID = "v2";
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
 	private static final boolean ALWAYS_SHOW_UPDATE = false;
@@ -292,9 +294,9 @@ public class ClanTurfPlugin extends Plugin
 	 *  Hub-built jar version instead (see updateMessage()). */
 	private static final String UPDATE_LABEL = "[Update]";
 	private static final String[] UPDATE_LINES = {
-		"Your clan now loads instantly on login - claim right away, no more 'join a clan' first.",
-		"Fixed a rare disconnect when switching between Online and Offline.",
-		"New: update notes like this show in chat when Clan Turf updates. Toggle off in settings.",
+		"New: Alliances. Team up with other clans - allied tiles share one color and count as one team.",
+		"Owners and Admins of your clan can create an alliance with a passcode or join one, all from the side panel.",
+		"The clan that made the alliance can recolor it, remove clans, or disband it.",
 	};
 
 	/** Set when we log in with an unseen update; the changelog fires on the next game tick, since chat
@@ -306,6 +308,12 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Clans (lower-case) we've locally recolored from the color list, so we can clear them on a change. */
 	private final Set<String> whitelistApplied = new HashSet<>();
+	private final Set<String> allianceApplied = new HashSet<>();
+	private Map<String, String> lastAllianceColors = java.util.Collections.emptyMap();
+	private String cachedPasscode;    // owner clan only: the alliance passcode (refetched on a throttle)
+	private String cachedPasscodeAid; // the alliance id the cached passcode/blacklist belong to
+	private java.util.List<String> cachedBlacklist = java.util.Collections.emptyList(); // owner clan: blocked
+	private long lastOwnerInfoMs;     // throttle: refetch owner-info (passcode + blacklist) at most every 20s
 
 	/** Tiles-per-hour tracker: every claim this session (each new tile you step onto, retakes
 	 * included), the timestamp of the first claim, and a once-per-second cached rate so the
@@ -390,7 +398,10 @@ public class ClanTurfPlugin extends Plugin
 		panel = new ClanTurfPanel(this::clearOfflineTiles, this::setUseServer,
 				colorPickerManager, this::onClanColorChosen, this::setSlug,
 				this::addSandboxClan, this::selectPaintClan, this::removeSandboxClan,
-				this::renameSandboxClan, this::setEraser);
+				this::renameSandboxClan, this::setEraser,
+				this::createAlliance, this::joinAlliance, this::leaveAlliance,
+				this::changeAllianceColor);
+		panel.setAllianceOwnerHandlers(this::kickAllianceClan, this::changeAlliancePasscode);
 		panel.setSlug(config.fullSlug());
 		panel.setEraser(config.eraser());
 		navButton = NavigationButton.builder()
@@ -459,7 +470,12 @@ public class ClanTurfPlugin extends Plugin
 		{
 			ClanTurfColors.removeOverride(c);
 		}
+		for (String c : allianceApplied)
+		{
+			ClanTurfColors.removeOverride(c);
+		}
 		whitelistApplied.clear();
+		allianceApplied.clear();
 		ClanTurfColors.setColorblindMode(ColorblindMode.NONE);
 		clearBarks();
 	}
@@ -545,6 +561,80 @@ public class ClanTurfPlugin extends Plugin
 			ClanTurfColors.setColorblindMode(config.colorblindMode());
 			refreshClaims();
 		}
+		else if ("blockedAllies".equals(key))
+		{
+			syncBlockedAllies();
+		}
+	}
+
+	/** The owner edited the Blocked allies list in settings: push the difference (vs the server's current
+	 *  blacklist) to the server - a name added blocks/kicks that clan, a name removed un-blocks it. Ignored
+	 *  unless your clan owns an alliance, and it skips the plugin's own mirror writes so it can't loop. */
+	private void syncBlockedAllies()
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		String clan = effectiveClanName();
+		String aid = clan == null ? null : store.allianceIdOf(clan);
+		if (aid == null || !isOwnerClan(clan) || !canManageAlliance())
+		{
+			return;
+		}
+		java.util.Map<String, String> now = new java.util.HashMap<>(); // lower-case -> display name
+		for (String c : parseClanCsv(config.blockedAllies()))
+		{
+			now.put(c.toLowerCase(), c);
+		}
+		java.util.Set<String> had = new java.util.HashSet<>();
+		for (String c : cachedBlacklist)
+		{
+			had.add(c.toLowerCase());
+		}
+		if (now.keySet().equals(had))
+		{
+			return; // no real change (or it was our own mirror write) - don't loop
+		}
+		final String faid = aid;
+		final String fclan = clan;
+		final java.util.List<String> prev = new java.util.ArrayList<>(cachedBlacklist);
+		executor.execute(() ->
+		{
+			for (Map.Entry<String, String> e : now.entrySet())
+			{
+				if (!had.contains(e.getKey()))
+				{
+					serverStore.allianceKick(faid, fclan, e.getValue()); // block, and kick if a member
+				}
+			}
+			for (String c : prev)
+			{
+				if (!now.containsKey(c.toLowerCase()))
+				{
+					serverStore.allianceUnblacklist(faid, fclan, c); // un-block
+				}
+			}
+			javax.swing.SwingUtilities.invokeLater(() -> lastOwnerInfoMs = 0); // refetch to reconcile
+		});
+	}
+
+	/** Split a comma-separated clan list into trimmed, non-empty names. */
+	private static java.util.List<String> parseClanCsv(String raw)
+	{
+		java.util.List<String> out = new java.util.ArrayList<>();
+		if (raw != null)
+		{
+			for (String part : raw.split(","))
+			{
+				String s = part.trim();
+				if (!s.isEmpty())
+				{
+					out.add(s);
+				}
+			}
+		}
+		return out;
 	}
 
 	@Subscribe
@@ -606,6 +696,17 @@ public class ClanTurfPlugin extends Plugin
 		if (local == null)
 		{
 			return;
+		}
+
+		// Alliance data arrives on a background poll; the map reference is swapped each poll, so this
+		// re-applies the shared team colors only when the alliance set actually changed.
+		if (!store.allianceColors().equals(lastAllianceColors))
+		{
+			applyWhitelist();      // re-applies team colors and records the new alliance map
+			updateAlliancePanel(); // reflect join/leave/kick in the panel (member list, Leave button)
+			// Membership changing relabels the leader between a clan and its alliance (Wrath <-> WRATH).
+			// Re-baseline the boundary silently so that relabel isn't announced as a bogus takeover.
+			leaderInit = false;
 		}
 
 		// Keep the paint-as roster's "your clan" entry current as the clan channel loads or changes, and
@@ -683,9 +784,10 @@ public class ClanTurfPlugin extends Plugin
 			if (++panelTicks >= PANEL_UPDATE_TICKS)
 			{
 				panelTicks = 0;
-				panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-						effectiveClanName(), findBattle(world), store.connectionStatus(), clanHintDue());
-				panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
+				panel.update(aggregatedClaims(), world, GrandExchangeArea.totalTiles(), committedLeader,
+						displayClan(effectiveClanName()), findBattle(world), store.connectionStatus(),
+						clanHintDue());
+				panel.updateBattles(battlesForPanel(), displayClan(effectiveClanName()), client.getWorld());
 				panel.setGlobalClaims(store.getGlobalClaims());
 			}
 		}
@@ -884,19 +986,29 @@ public class ClanTurfPlugin extends Plugin
 				wp.getRegionID(), wp.getRegionX(), wp.getRegionY(), wp.getPlane(),
 				world, clanName);
 
-		// A genuine gain (for the community counter) is a tile not already ours - empty or a rival's.
-		// Re-walking our own turf claims nothing new, so it must not tick the counter (the server counts
-		// gains the same way, so the optimistic ticks stay in step with the authoritative total).
+		// Who currently holds this tile, if anyone (there's only one owner per tile).
 		String tk = tileKey(point);
-		boolean gain = true;
+		String currentOwner = null;
 		for (ClanTurfPoint c : visibleClaims)
 		{
-			if (clanName.equals(c.getClanName()) && tk.equals(tileKey(c)))
+			if (tk.equals(tileKey(c)))
 			{
-				gain = false;
+				currentOwner = c.getClanName();
 				break;
 			}
 		}
+
+		// Don't take an ally's tile: if a clan in our alliance holds it, walk over it and leave it theirs.
+		if (currentOwner != null && !currentOwner.equalsIgnoreCase(clanName)
+				&& sameAlliance(clanName, currentOwner))
+		{
+			return; // lastTile is already set above, so this tile won't be reprocessed
+		}
+
+		// A genuine gain (for the community counter) is a tile not already ours - empty or a rival's.
+		// Re-walking our own turf claims nothing new, so it must not tick the counter (the server counts
+		// gains the same way, so the optimistic ticks stay in step with the authoritative total).
+		boolean gain = !clanName.equals(currentOwner);
 
 		store.putClaim(point); // last-writer-wins = takeover; fires the change listener
 		arrivalTiles.add(tk); // one of my fresh claims - excluded from the pre-existing owner
@@ -978,6 +1090,13 @@ public class ClanTurfPlugin extends Plugin
 	Collection<ClanTurfPoint> getVisibleClaims()
 	{
 		return visibleClaims;
+	}
+
+	/** Claims with allied clans relabeled to their alliance - what the overlay draws, so an alliance's
+	 *  territory reads as one team (no internal seams between allied clans, tiles merge with filler). */
+	Collection<ClanTurfPoint> getDisplayClaims()
+	{
+		return aggregatedClaims();
 	}
 
 	/** Whether the player is near the GE right now (read by the TPH tracker overlay to fade in/out). */
@@ -1228,7 +1347,7 @@ public class ClanTurfPlugin extends Plugin
 	{
 		List<ClanTurfBattle> list = new java.util.ArrayList<>(store.getBattles());
 		int world = client.getWorld();
-		List<ClanTurfPoint> claims = visibleClaims;
+		List<ClanTurfPoint> claims = aggregatedClaims(); // allied clans count as one team here too
 		if (world > 0 && claims != null && !claims.isEmpty())
 		{
 			Map<String, Integer> counts = new HashMap<>();
@@ -1395,11 +1514,34 @@ public class ClanTurfPlugin extends Plugin
 		{
 			ClanTurfColors.removeOverride(c);
 		}
+		for (String c : allianceApplied)
+		{
+			ClanTurfColors.removeOverride(c);
+		}
 		whitelistApplied.clear();
+		allianceApplied.clear();
+		// Alliance colors first, as the team default: allied clans and the alliance's scoreboard label
+		// all share one color.
+		lastAllianceColors = store.allianceColors();
+		for (Map.Entry<String, String> e : lastAllianceColors.entrySet())
+		{
+			Color col = hexColor(e.getValue());
+			if (col != null)
+			{
+				ClanTurfColors.setOverride(e.getKey(), col);
+				allianceApplied.add(e.getKey().toLowerCase());
+				String disp = displayClan(e.getKey());
+				if (disp != null && !disp.equalsIgnoreCase(e.getKey()))
+				{
+					ClanTurfColors.setOverride(disp, col);
+					allianceApplied.add(disp.toLowerCase());
+				}
+			}
+		}
+		// Then your own custom list on top, so clicking a bar to pick a local color beats even the
+		// alliance color for your own view. Offline, the sandbox list layers on too.
 		if (config.customClanColor())
 		{
-			// The shareable online list always applies. Offline, the sandbox's own list layers on top, so
-			// test-clan colors never clutter the palette you'd copy and share.
 			applyColorList(config.clanColorWhitelist());
 			if (store == localStore)
 			{
@@ -1411,6 +1553,451 @@ public class ClanTurfPlugin extends Plugin
 		if (panel != null)
 		{
 			pushPaintClans();
+		}
+	}
+
+	/** Parse a 6-hex RRGGBB string into an opaque Color, or null if malformed. */
+	private static Color hexColor(String hex)
+	{
+		if (hex == null || hex.length() != 6)
+		{
+			return null;
+		}
+		try
+		{
+			return new Color(Integer.parseInt(hex, 16));
+		}
+		catch (NumberFormatException e)
+		{
+			return null;
+		}
+	}
+
+	/** True when both clans are in the same alliance, so we leave each other's tiles alone. */
+	private boolean sameAlliance(String a, String b)
+	{
+		String ida = store.allianceIdOf(a);
+		return ida != null && ida.equals(store.allianceIdOf(b));
+	}
+
+	/**
+	 * True if the local player is at least Administrator in their clan, so alliance setup/management is
+	 * done by clan leadership (Owner, Deputy Owner, Administrator - rank >= 100). Everyone below just
+	 * inherits the alliance automatically. Client-side gate: the server never sees ranks, so it's a
+	 * leadership convenience, not a hard lock.
+	 */
+	private boolean canManageAlliance()
+	{
+		if (config.allianceIgnoreRank())
+		{
+			return true; // testing toggle (Extras); overrides the rank gate - hide/remove before release
+		}
+		ClanChannel channel = client.getClanChannel();
+		Player local = client.getLocalPlayer();
+		if (channel == null || local == null || local.getName() == null)
+		{
+			return false;
+		}
+		String me = Text.sanitize(local.getName());
+		for (ClanChannelMember m : channel.getMembers())
+		{
+			if (m != null && m.getName() != null && Text.sanitize(m.getName()).equalsIgnoreCase(me))
+			{
+				return m.getRank() != null
+						&& m.getRank().getRank() >= ClanRank.ADMINISTRATOR.getRank();
+			}
+		}
+		return false;
+	}
+
+	/** True if {@code clan} is the owner (creating) clan of its alliance - its Admin+ manage color/disband. */
+	private boolean isOwnerClan(String clan)
+	{
+		if (clan == null)
+		{
+			return false;
+		}
+		String owner = store.allianceOwnerClanOf(clan);
+		return owner != null && owner.equalsIgnoreCase(clan);
+	}
+
+	/** The scoreboard label for a clan: its alliance's name (or id) if it's allied, else the clan itself. */
+	private String displayClan(String clan)
+	{
+		if (clan == null)
+		{
+			return null;
+		}
+		String aid = store.allianceIdOf(clan);
+		if (aid == null)
+		{
+			return clan;
+		}
+		String name = store.allianceNameOf(clan);
+		return (name == null || name.isEmpty()) ? aid : name;
+	}
+
+	/**
+	 * The claim set relabeled so allied clans collapse under a single alliance name - used only for the
+	 * scoreboard and the leader/headline, so every viewer sees the alliance as one team. The overlay,
+	 * takeover barks, and claim logic keep the real per-clan names. Returns the original list unchanged
+	 * when no alliances exist, so non-alliance play is byte-for-byte the same.
+	 */
+	private java.util.List<ClanTurfPoint> aggregatedClaims()
+	{
+		if (store.allianceColors().isEmpty())
+		{
+			return visibleClaims;
+		}
+		java.util.List<ClanTurfPoint> out = new java.util.ArrayList<>(visibleClaims.size());
+		for (ClanTurfPoint p : visibleClaims)
+		{
+			String disp = displayClan(p.getClanName());
+			if (disp != null && !disp.equals(p.getClanName()))
+			{
+				out.add(new ClanTurfPoint(p.getRegionId(), p.getRegionX(), p.getRegionY(),
+						p.getZ(), p.getWorld(), disp));
+			}
+			else
+			{
+				out.add(p);
+			}
+		}
+		return out;
+	}
+
+	// ---- alliance actions from the panel; the network runs off the EDT ----
+
+	private void createAlliance(String[] args)
+	{
+		if (store != serverStore)
+		{
+			panel.setAllianceStatus("Go online to use alliances.");
+			return;
+		}
+		String clan = effectiveClanName();
+		if (clan == null)
+		{
+			panel.setAllianceStatus("You need to be in a clan first.");
+			return;
+		}
+		if (!canManageAlliance())
+		{
+			panel.setAllianceStatus("Only your clan's Owner / Deputy / Admin can manage alliances.");
+			return;
+		}
+		String name = args.length > 0 ? args[0] : "";
+		String colorHex = args.length > 1 ? args[1] : "";
+		String passcode = args.length > 2 ? args[2] : "";
+		panel.setAllianceStatus("Creating…");
+		executor.execute(() ->
+		{
+			String resp = serverStore.allianceCreate(clan, name, colorHex,
+					passcode == null || passcode.isEmpty() ? null : passcode);
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				if (resp != null && resp.startsWith("ok,"))
+				{
+					String[] f = resp.trim().split(",");
+					if (f.length >= 4)
+					{
+						configManager.setConfiguration(ConfigClanTurfStore.GROUP,
+								"allianceOwnerToken", f[3]);
+					}
+					panel.setAllianceStatus("Alliance created. Passcode: "
+							+ (f.length >= 3 ? f[2] : "?"));
+					serverStore.refreshAlliancesSoon();
+				}
+				else
+				{
+					panel.setAllianceStatus("Couldn't create: " + shortErr(resp));
+				}
+			});
+		});
+	}
+
+	private void joinAlliance(String passcode)
+	{
+		if (store != serverStore)
+		{
+			panel.setAllianceStatus("Go online to use alliances.");
+			return;
+		}
+		String clan = effectiveClanName();
+		if (clan == null)
+		{
+			panel.setAllianceStatus("You need to be in a clan first.");
+			return;
+		}
+		if (!canManageAlliance())
+		{
+			panel.setAllianceStatus("Only your clan's Owner / Deputy / Admin can manage alliances.");
+			return;
+		}
+		panel.setAllianceStatus("Joining…");
+		executor.execute(() ->
+		{
+			String resp = serverStore.allianceJoin(clan, passcode);
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				if (resp != null && resp.startsWith("ok,"))
+				{
+					// Joiners aren't the owner, so drop any stale owner token we might have held.
+					configManager.unsetConfiguration(ConfigClanTurfStore.GROUP, "allianceOwnerToken");
+					panel.setAllianceStatus("Joined the alliance!");
+					serverStore.refreshAlliancesSoon();
+				}
+				else
+				{
+					panel.setAllianceStatus("Couldn't join: " + shortErr(resp));
+				}
+			});
+		});
+	}
+
+	private void leaveAlliance()
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		String clan = effectiveClanName();
+		if (clan == null)
+		{
+			return;
+		}
+		if (!canManageAlliance())
+		{
+			panel.setAllianceStatus("Only your clan's Owner / Deputy / Admin can manage alliances.");
+			return;
+		}
+		String aid = store.allianceIdOf(clan);
+		if (aid == null)
+		{
+			return;
+		}
+		boolean owner = isOwnerClan(clan);
+		panel.setAllianceStatus(owner ? "Disbanding…" : "Leaving…");
+		executor.execute(() ->
+		{
+			if (owner)
+			{
+				serverStore.allianceDisband(aid, clan);
+			}
+			else
+			{
+				serverStore.allianceLeave(clan);
+			}
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				configManager.unsetConfiguration(ConfigClanTurfStore.GROUP, "allianceOwnerToken");
+				panel.setAllianceStatus(owner ? "Alliance disbanded." : "Left the alliance.");
+				serverStore.refreshAlliancesSoon();
+			});
+		});
+	}
+
+	/** Owner-only: recolor the alliance (needs our stored owner token). Joiners have no token, so the
+	 *  panel never shows them the button, and the server rejects it anyway. */
+	private void changeAllianceColor(String hex)
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		String clan = effectiveClanName();
+		String aid = clan == null ? null : store.allianceIdOf(clan);
+		if (aid == null || !isOwnerClan(clan) || !canManageAlliance())
+		{
+			panel.setAllianceStatus("Only the owner clan's Admin+ can change the color.");
+			return;
+		}
+		panel.setAllianceStatus("Updating color…");
+		executor.execute(() ->
+		{
+			String resp = serverStore.allianceSetColor(aid, clan, hex);
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				if (resp != null && resp.startsWith("ok"))
+				{
+					panel.setAllianceStatus("Color updated.");
+					serverStore.refreshAlliancesSoon();
+				}
+				else
+				{
+					panel.setAllianceStatus("Couldn't change color: " + shortErr(resp));
+				}
+			});
+		});
+	}
+
+	private static String shortErr(String resp)
+	{
+		if (resp == null)
+		{
+			return "no response";
+		}
+		String s = resp.trim();
+		return s.isEmpty() ? "error" : s;
+	}
+
+	/** Owner clan staff: kick an allied clan and block it from rejoining. */
+	private void kickAllianceClan(String target)
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		String clan = effectiveClanName();
+		String aid = clan == null ? null : store.allianceIdOf(clan);
+		if (aid == null || target == null || !isOwnerClan(clan) || !canManageAlliance())
+		{
+			return;
+		}
+		panel.setAllianceStatus("Removing " + target + "...");
+		executor.execute(() ->
+		{
+			String resp = serverStore.allianceKick(aid, clan, target);
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				panel.setAllianceStatus(resp != null && resp.startsWith("ok") ? " "
+						: "Couldn't remove: " + shortErr(resp));
+				lastOwnerInfoMs = 0; // force a fresh owner-info fetch so the blocked list updates
+				serverStore.refreshAlliancesSoon();
+			});
+		});
+	}
+
+	/** Owner clan staff: change the alliance passcode (the old code must match). */
+	private void changeAlliancePasscode(String oldPass, String newPass)
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		String clan = effectiveClanName();
+		String aid = clan == null ? null : store.allianceIdOf(clan);
+		if (aid == null || !isOwnerClan(clan) || !canManageAlliance())
+		{
+			return;
+		}
+		panel.setAllianceStatus("Changing passcode...");
+		executor.execute(() ->
+		{
+			String resp = serverStore.allianceSetPasscode(aid, clan, oldPass, newPass);
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				if (resp != null && resp.startsWith("ok"))
+				{
+					panel.setAllianceStatus("Passcode changed.");
+					cachedPasscode = newPass;
+					panel.setAlliancePasscode(newPass); // show it now, don't wait on the throttled refetch
+					lastOwnerInfoMs = 0;                // refetch later to reconcile with the server
+				}
+				else
+				{
+					panel.setAllianceStatus("Couldn't change passcode: " + shortErr(resp));
+				}
+			});
+		});
+	}
+
+	/** Push the current alliance state (store + our clan) into the panel section each refresh. */
+	private void updateAlliancePanel()
+	{
+		if (panel == null)
+		{
+			return;
+		}
+		boolean online = store == serverStore;
+		String clan = effectiveClanName();
+		String aid = (online && clan != null) ? store.allianceIdOf(clan) : null;
+		boolean canManage = online && canManageAlliance();
+		if (aid == null)
+		{
+			clearOwnerInfo();
+			panel.setAlliance(online, false, canManage, null, null, false,
+					java.util.Collections.emptyList(), java.util.Collections.emptyList());
+			panel.setAlliancePasscode(null);
+			return;
+		}
+		java.util.List<String> members = new java.util.ArrayList<>(store.alliesOf(clan));
+		java.util.Collections.sort(members);
+		String colorHex = store.allianceColors().get(clan.toLowerCase());
+		String name = store.allianceNameOf(clan);
+		boolean isOwnerClan = isOwnerClan(clan);
+		// Members you (the owner clan's staff) can kick: everyone but your own clan. Joiners get an empty
+		// list, so no kick controls appear for them.
+		java.util.List<String> kickable = java.util.Collections.emptyList();
+		if (isOwnerClan && canManage)
+		{
+			kickable = new java.util.ArrayList<>(members);
+			kickable.removeIf(m -> m.equalsIgnoreCase(clan));
+		}
+		panel.setAlliance(true, true, canManage, name, colorHex, isOwnerClan, members, kickable);
+		// Owner clan's staff can see + copy the passcode to re-share it; joiners never see it.
+		if (isOwnerClan && canManage)
+		{
+			refreshOwnerInfo(aid, clan);
+			boolean fresh = aid.equals(cachedPasscodeAid);
+			panel.setAlliancePasscode(fresh ? cachedPasscode : null);
+		}
+		else
+		{
+			clearOwnerInfo();
+			panel.setAlliancePasscode(null);
+		}
+	}
+
+	private void clearOwnerInfo()
+	{
+		cachedPasscode = null;
+		cachedPasscodeAid = null;
+		cachedBlacklist = java.util.Collections.emptyList();
+		lastOwnerInfoMs = 0;
+	}
+
+	/** Owner clan only: (re)fetch the passcode + blacklist off the EDT, throttled to every 20s so a
+	 *  passcode change by another admin propagates without hammering the server. */
+	private void refreshOwnerInfo(String aid, String clan)
+	{
+		long now = System.currentTimeMillis();
+		boolean sameAlliance = aid.equals(cachedPasscodeAid);
+		if (sameAlliance && now - lastOwnerInfoMs < 20000)
+		{
+			return; // fetched recently; the throttle window catches any change soon enough
+		}
+		if (!sameAlliance)
+		{
+			cachedPasscode = null; // different alliance - drop the stale code until the new one loads
+			cachedBlacklist = java.util.Collections.emptyList();
+		}
+		cachedPasscodeAid = aid;
+		lastOwnerInfoMs = now;
+		executor.execute(() ->
+		{
+			HttpClanTurfStore.OwnerInfo info = serverStore.allianceOwnerInfo(aid, clan);
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				if (info == null || !aid.equals(cachedPasscodeAid))
+				{
+					return; // failed, or we left/switched alliances mid-request
+				}
+				cachedPasscode = info.passcode;
+				cachedBlacklist = info.blacklist;
+				panel.setAlliancePasscode(info.passcode);
+				updateBlacklistConfig();
+			});
+		});
+	}
+
+	/** Mirror the blocked-clan list into the config string so it shows in the Blocked allies settings. */
+	private void updateBlacklistConfig()
+	{
+		String joined = String.join(", ", cachedBlacklist);
+		if (!joined.equals(config.blockedAllies()))
+		{
+			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "blockedAllies", joined);
 		}
 	}
 
@@ -1685,6 +2272,15 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
+		// If the alliance set changed since the last paint (e.g. a disband/leave just cleared it), re-apply
+		// the team colors NOW, before painting. Otherwise the scoreboard shows a just-freed clan in its old
+		// alliance color for one frame until onGameTick catches up (the "flash back to purple").
+		if (!store.allianceColors().equals(lastAllianceColors))
+		{
+			applyWhitelist();
+			leaderInit = false;
+		}
+		updateAlliancePanel();
 		// Before login there's no world and no reason to mention the server: startUp() calls this at
 		// the login screen, where "Connecting to the sync server..." is nonsense. Show a plain waiting
 		// message until we're actually in-game; the connection wording only kicks in once logged in.
@@ -1694,9 +2290,9 @@ public class ClanTurfPlugin extends Plugin
 			panel.updateBattles(Collections.emptyList(), effectiveClanName(), -1);
 			return;
 		}
-		panel.update(visibleClaims, world, GrandExchangeArea.totalTiles(), committedLeader,
-				effectiveClanName(), findBattle(world), store.connectionStatus(), clanHintDue());
-		panel.updateBattles(battlesForPanel(), effectiveClanName(), client.getWorld());
+		panel.update(aggregatedClaims(), world, GrandExchangeArea.totalTiles(), committedLeader,
+				displayClan(effectiveClanName()), findBattle(world), store.connectionStatus(), clanHintDue());
+		panel.updateBattles(battlesForPanel(), displayClan(effectiveClanName()), client.getWorld());
 		panel.setGlobalClaims(store.getGlobalClaims());
 	}
 
@@ -1728,7 +2324,7 @@ public class ClanTurfPlugin extends Plugin
 	 */
 	private void updateLeader()
 	{
-		String instant = stickyLeader(visibleClaims, committedLeader);
+		String instant = stickyLeader(aggregatedClaims(), committedLeader);
 		long now = System.currentTimeMillis();
 
 		if (!leaderInit)
@@ -2053,12 +2649,13 @@ public class ClanTurfPlugin extends Plugin
 	 */
 	private String preExistingLeader()
 	{
+		java.util.List<ClanTurfPoint> agg = aggregatedClaims();
 		if (arrivalTiles.isEmpty())
 		{
-			return stickyLeader(visibleClaims, committedLeader);
+			return stickyLeader(agg, committedLeader);
 		}
-		java.util.List<ClanTurfPoint> pre = new java.util.ArrayList<>(visibleClaims.size());
-		for (ClanTurfPoint p : visibleClaims)
+		java.util.List<ClanTurfPoint> pre = new java.util.ArrayList<>(agg.size());
+		for (ClanTurfPoint p : agg)
 		{
 			if (!arrivalTiles.contains(tileKey(p)))
 			{

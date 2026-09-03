@@ -33,9 +33,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -62,6 +65,7 @@ class HttpClanTurfStore implements ClanTurfStore
 	private static final long POLL_MS = 2000;
 	private static final long FLUSH_MS = 1000;
 	private static final long BATTLES_POLL_MS = 15000; // the active-battles board updates slowly
+	private static final long ALLIANCES_POLL_MS = 20000; // alliances change rarely, so poll gently
 	private static final long CONNECT_GRACE_MS = 30000; // cold-start window before we call it down
 	private static final long STALE_MS = 45000; // no reply for this long = treat the server as down
 
@@ -76,6 +80,14 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile List<ClanTurfPoint> cache = Collections.emptyList();
 	private volatile List<ClanTurfBattle> battles = Collections.emptyList();
 	private volatile long globalClaims; // all-time community total from /battles (0 until first poll)
+
+	// Alliance map from /alliances. clan(lower) -> 6-hex color, clan(lower) -> allianceId,
+	// allianceId -> member clan names (original case). Global, not per-world.
+	private volatile Map<String, String> allyColor = Collections.emptyMap();
+	private volatile Map<String, String> allyId = Collections.emptyMap();
+	private volatile Map<String, Set<String>> allyMembers = Collections.emptyMap();
+	private volatile Map<String, String> allyNameById = Collections.emptyMap(); // allianceId -> name
+	private volatile Map<String, String> allyOwnerById = Collections.emptyMap(); // allianceId -> owner clan
 
 	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
 	private volatile long startedMs;
@@ -112,6 +124,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		exec.scheduleWithFixedDelay(this::poll, POLL_MS, POLL_MS, TimeUnit.MILLISECONDS);
 		exec.scheduleWithFixedDelay(this::flush, FLUSH_MS, FLUSH_MS, TimeUnit.MILLISECONDS);
 		exec.scheduleWithFixedDelay(this::pollBattles, 0, BATTLES_POLL_MS, TimeUnit.MILLISECONDS);
+		exec.scheduleWithFixedDelay(this::pollAlliances, 0, ALLIANCES_POLL_MS, TimeUnit.MILLISECONDS);
 		log.info("ClanTurf sync store started against {}", baseUrl);
 	}
 
@@ -126,6 +139,11 @@ class HttpClanTurfStore implements ClanTurfStore
 		pending.clear();
 		cache = Collections.emptyList();
 		battles = Collections.emptyList();
+		allyColor = Collections.emptyMap();
+		allyId = Collections.emptyMap();
+		allyMembers = Collections.emptyMap();
+		allyNameById = Collections.emptyMap();
+		allyOwnerById = Collections.emptyMap();
 	}
 
 	@Override
@@ -180,6 +198,11 @@ class HttpClanTurfStore implements ClanTurfStore
 			activeWorld = -1;
 			cache = Collections.emptyList();
 			pending.clear();
+			allyColor = Collections.emptyMap();
+			allyId = Collections.emptyMap();
+			allyMembers = Collections.emptyMap();
+			allyNameById = Collections.emptyMap();
+			allyOwnerById = Collections.emptyMap();
 		}
 		else
 		{
@@ -187,6 +210,7 @@ class HttpClanTurfStore implements ClanTurfStore
 			if (e != null)
 			{
 				e.execute(this::pollBattles);
+				e.execute(this::pollAlliances);
 			}
 		}
 	}
@@ -359,6 +383,248 @@ class HttpClanTurfStore implements ClanTurfStore
 			}
 		}
 		battles = list;
+	}
+
+	/** Pulls the global alliance map: which clans are teamed up and the shared color of each team. */
+	private void pollAlliances()
+	{
+		if (!online)
+		{
+			return;
+		}
+		String body = send("GET", "/alliances", null);
+		if (body == null)
+		{
+			return;
+		}
+		Map<String, String> color = new HashMap<>();
+		Map<String, String> id = new HashMap<>();
+		Map<String, Set<String>> members = new HashMap<>();
+		Map<String, String> nameById = new HashMap<>();
+		Map<String, String> colorById = new HashMap<>();
+		Map<String, String> ownerById = new HashMap<>();
+		for (String line : body.split("\n"))
+		{
+			if (line.isBlank())
+			{
+				continue;
+			}
+			if (line.startsWith("A,"))
+			{
+				String[] f = line.split(",", 4); // A,id,color,name
+				if (f.length >= 3)
+				{
+					colorById.put(f[1], f[2].trim());
+					nameById.put(f[1], f.length >= 4 ? f[3] : "");
+				}
+			}
+			else if (line.startsWith("M,"))
+			{
+				String[] f = line.split(",", 4); // M,id,ownerFlag,clan
+				if (f.length >= 4)
+				{
+					String aid = f[1];
+					String clan = f[3];
+					id.put(clan.toLowerCase(), aid);
+					members.computeIfAbsent(aid, k -> new HashSet<>()).add(clan);
+					if ("1".equals(f[2]))
+					{
+						ownerById.put(aid, clan);
+					}
+				}
+			}
+		}
+		// Fill each member's color from its alliance's A line (A lines precede M lines, but do it in
+		// a second pass so ordering never matters).
+		for (Map.Entry<String, String> e : id.entrySet())
+		{
+			String hex = colorById.get(e.getValue());
+			if (hex != null)
+			{
+				color.put(e.getKey(), hex);
+			}
+		}
+		allyColor = color;
+		allyId = id;
+		allyMembers = members;
+		allyNameById = nameById;
+		allyOwnerById = ownerById;
+	}
+
+	@Override
+	public Map<String, String> allianceColors()
+	{
+		return allyColor; // keyed by lower-case clan; ClanTurfColors lower-cases too, so it lines up
+	}
+
+	@Override
+	public String allianceIdOf(String clan)
+	{
+		return clan == null ? null : allyId.get(clan.toLowerCase());
+	}
+
+	@Override
+	public Set<String> alliesOf(String clan)
+	{
+		String aid = allianceIdOf(clan);
+		if (aid == null)
+		{
+			return Collections.emptySet();
+		}
+		Set<String> m = allyMembers.get(aid);
+		return m == null ? Collections.emptySet() : m;
+	}
+
+	@Override
+	public String allianceNameOf(String clan)
+	{
+		String aid = allianceIdOf(clan);
+		return aid == null ? null : allyNameById.get(aid);
+	}
+
+	@Override
+	public String allianceOwnerClanOf(String clan)
+	{
+		String aid = allianceIdOf(clan);
+		return aid == null ? null : allyOwnerById.get(aid);
+	}
+
+	// ---- alliance actions: blocking POSTs, so the plugin runs them off the game/EDT thread ----
+
+	String allianceCreate(String clan, String name, String color, String passcode)
+	{
+		return sendResult("POST", "/alliance/create",
+				form("clan", clan, "name", name, "color", color, "passcode", passcode));
+	}
+
+	String allianceJoin(String clan, String passcode)
+	{
+		return sendResult("POST", "/alliance/join", form("clan", clan, "passcode", passcode));
+	}
+
+	String allianceLeave(String clan)
+	{
+		return sendResult("POST", "/alliance/leave", form("clan", clan));
+	}
+
+	String allianceSetColor(String id, String clan, String color)
+	{
+		return sendResult("POST", "/alliance/color", form("id", id, "clan", clan, "color", color));
+	}
+
+	String allianceKick(String id, String clan, String target)
+	{
+		return sendResult("POST", "/alliance/kick", form("id", id, "clan", clan, "target", target));
+	}
+
+	String allianceDisband(String id, String clan)
+	{
+		return sendResult("POST", "/alliance/disband", form("id", id, "clan", clan));
+	}
+
+	/** Owner clan's passcode + blocked clans, bundled from one request. */
+	static final class OwnerInfo
+	{
+		final String passcode;
+		final java.util.List<String> blacklist;
+
+		OwnerInfo(String passcode, java.util.List<String> blacklist)
+		{
+			this.passcode = passcode;
+			this.blacklist = blacklist;
+		}
+	}
+
+	/** Owner clan only: fetch the passcode and blocked clans so staff can re-share the code and un-block
+	 *  clans. Returns null if the server refused (not the owner clan) or was unreachable. Blocking - run
+	 *  off the EDT. Wire format: "ok,<passcode>" then one "BL,<clan>" line per blocked clan. */
+	OwnerInfo allianceOwnerInfo(String id, String clan)
+	{
+		String resp = sendResult("POST", "/alliance/owner-info", form("id", id, "clan", clan));
+		if (resp == null || !resp.startsWith("ok,"))
+		{
+			return null;
+		}
+		String pass = null;
+		java.util.List<String> bl = new java.util.ArrayList<>();
+		for (String line : resp.split("\n"))
+		{
+			if (line.startsWith("ok,"))
+			{
+				pass = line.substring(3).trim();
+			}
+			else if (line.startsWith("BL,"))
+			{
+				String c = line.substring(3).trim();
+				if (!c.isEmpty())
+				{
+					bl.add(c);
+				}
+			}
+		}
+		return new OwnerInfo(pass, bl);
+	}
+
+	/** Owner clan only: change the passcode (old must match). Current members stay; new joiners need it. */
+	String allianceSetPasscode(String id, String clan, String oldPass, String newPass)
+	{
+		return sendResult("POST", "/alliance/setpasscode",
+				form("id", id, "clan", clan, "old", oldPass, "new", newPass));
+	}
+
+	/** Owner clan only: un-block a previously kicked clan so it can rejoin with the passcode. */
+	String allianceUnblacklist(String id, String clan, String target)
+	{
+		return sendResult("POST", "/alliance/unblacklist", form("id", id, "clan", clan, "target", target));
+	}
+
+	/** Kick an immediate alliance re-poll so a create/join shows up without waiting for the timer. */
+	void refreshAlliancesSoon()
+	{
+		ScheduledExecutorService e = exec;
+		if (e != null)
+		{
+			e.execute(this::pollAlliances);
+		}
+	}
+
+	/** Build a newline-separated {@code key=value} body from alternating key,value pairs; null values skipped. */
+	private static String form(String... kv)
+	{
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i + 1 < kv.length; i += 2)
+		{
+			if (kv[i + 1] == null)
+			{
+				continue;
+			}
+			sb.append(kv[i]).append('=').append(kv[i + 1]).append('\n');
+		}
+		return sb.toString();
+	}
+
+	/** Like {@link #send} but returns the body on any status, so callers can read the server's error text. */
+	private String sendResult(String method, String path, String body)
+	{
+		try
+		{
+			HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(baseUrl + path))
+					.timeout(Duration.ofSeconds(5));
+			b.method(method, body == null
+					? HttpRequest.BodyPublishers.noBody()
+					: HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+			HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
+			if (resp.statusCode() / 100 == 2)
+			{
+				lastOkMs = System.currentTimeMillis();
+			}
+			return resp.body();
+		}
+		catch (Exception e)
+		{
+			log.debug("{} {} failed: {}", method, path, e.toString());
+			return null;
+		}
 	}
 
 	private void flush()

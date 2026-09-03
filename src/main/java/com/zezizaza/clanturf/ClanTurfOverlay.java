@@ -186,7 +186,7 @@ class ClanTurfOverlay extends Overlay
 			lastOwners.clear();
 		}
 
-		Collection<ClanTurfPoint> claims = plugin.getVisibleClaims();
+		Collection<ClanTurfPoint> claims = plugin.getDisplayClaims();
 		final WorldPoint playerLocation = local.getWorldLocation();
 
 		// Boundary shows only near the GE (matches the tiles, and avoids the broken fragments

@@ -55,16 +55,24 @@ public interface ClanTurfConfig extends Config
 	String clanSection = "clanSection";
 
 	@ConfigSection(
+			name = "Blocked allies",
+			description = "Clans blocked from joining your alliance. Edit the list like the color lists.",
+			position = 3,
+			closedByDefault = true
+	)
+	String blockedAlliesSection = "blockedAlliesSection";
+
+	@ConfigSection(
 			name = "Network",
 			description = "The sync server that makes rival clans visible to each other.",
-			position = 3
+			position = 4
 	)
 	String networkSection = "networkSection";
 
 	@ConfigSection(
 			name = "Extras",
 			description = "Reset countdown and the tiles-per-hour tracker.",
-			position = 4
+			position = 5
 	)
 	String extrasSection = "extrasSection";
 
@@ -408,6 +416,33 @@ public interface ClanTurfConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+			keyName = "allianceIgnoreRank",
+			section = extrasSection,
+			name = "Alliance: ignore rank (testing)",
+			description = "TESTING ONLY: show alliance management regardless of your clan rank.",
+			position = 19,
+			hidden = true
+	)
+	default boolean allianceIgnoreRank()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+			keyName = "blockedAllies",
+			section = blockedAlliesSection,
+			name = "Blocked clans",
+			description = "Clan names, comma-separated, blocked from joining your alliance. Only applies "
+					+ "while your clan owns an alliance. Add a name to block (and kick) that clan; remove one "
+					+ "to un-block it. The kick x in the Alliance side panel adds to this list.",
+			position = 20
+	)
+	default String blockedAllies()
+	{
+		return "";
+	}
+
 	// -------------------------------------------------------------- hidden / internal
 	// Kept as config (so values persist) but not shown in the settings panel. The animation
 	// values below were dialed in during development and are now baked in.
@@ -655,6 +690,13 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(keyName = "lastUpdateSeen", name = "", description = "",
 			position = 134, hidden = true)
 	default String lastUpdateSeen()
+	{
+		return "";
+	}
+
+	@ConfigItem(keyName = "allianceOwnerToken", name = "", description = "",
+			position = 135, hidden = true)
+	default String allianceOwnerToken()
 	{
 		return "";
 	}

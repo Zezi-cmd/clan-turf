@@ -38,7 +38,9 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
 import java.awt.Window;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
@@ -61,6 +63,7 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -103,6 +106,43 @@ class ClanTurfPanel extends PluginPanel
 	private final Leaderboard board = new Leaderboard(this::openColorPicker);
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
+
+	// Alliance section (collapsible, sits under Active battles).
+	private final JLabel allianceHeader = new JLabel();
+	private final JPanel allianceBody = new JPanel();
+	private final JPanel allianceJoinCreate = new JPanel();
+	private final JPanel allianceMemberPanel = new JPanel();
+	private final JLabel allianceStatus = new JLabel();
+	private final JLabel allianceMembersLabel = new JLabel();
+	private final JPanel allianceSwatch = new JPanel();     // create-color preview + click to pick
+	private final JPanel allianceOwnSwatch = new JPanel();  // holds the current alliance color (picker seed)
+	private final JTextField nameField = new JTextField();
+	private final JLabel allianceNameLabel = new JLabel();
+	private final JTextField createPass = new JTextField();
+	private final JTextField joinPass = new JTextField();
+	private final StyledButton createBtn = new StyledButton("Create alliance", 26);
+	private final StyledButton joinBtn = new StyledButton("Join alliance", 26);
+	private final StyledButton leaveBtn = new StyledButton("Leave alliance", 26);
+	private final StyledButton changeColorBtn = new StyledButton("Change alliance color", 26);
+	private final JLabel alliancePasscodeLabel = new JLabel(); // owner clan only: click to copy the code
+	private String alliancePasscodeValue;                      // the raw passcode the label copies
+	private Timer passcodeCopyTimer;                           // reverts the "copied" flash back to the code
+	private Timer statusClearTimer;                            // clears transient alliance status messages
+	private final StyledButton changePasscodeBtn = new StyledButton("Change passcode", 26);
+	private final JPanel allianceMembersList = new JPanel(); // owner view: member rows, each with a kick X
+	private String membersRowsSig; // guard so the member rows only rebuild when they actually change
+	private Consumer<String> onKickClan;    // owner: kick + block an allied clan
+	private BiConsumer<String, String> onChangePasscode; // owner: (old, new) change the passcode
+	private Color createColor = new Color(0x8a, 0x2b, 0xe2); // default alliance color (purple)
+	private boolean allianceCollapsed = false;
+	private boolean allianceInAlliance = false;
+	private boolean allianceOnline = true;
+	private boolean allianceCanManage = false;
+	private boolean allianceIsOwnerClan = false; // our clan created the alliance -> Disband, not Leave
+	private boolean battlesCollapsed = false;
+	private boolean globalCollapsed = false;
+	private boolean globalHasData = false;
+	private String battlesBase = "Active battles";
 	private final StyledButton clearOfflineBtn = new StyledButton("Clear all tiles", 30);
 	private final StyledButton serverToggleBtn = new StyledButton("Online", 30);
 	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
@@ -116,6 +156,10 @@ class ClanTurfPanel extends PluginPanel
 	private final Consumer<String> onSelectClan; // offline: paint as this clan
 	private final Consumer<String> onRemoveClan; // offline: remove a test clan
 	private final BiConsumer<String, String> onRenameClan; // offline: (old, new) rename a test clan
+	private final Consumer<String[]> onCreateAlliance; // {name, colorHex, passcode} -> create alliance
+	private final Consumer<String> onJoinAlliance; // (passcode) -> join an alliance
+	private final Runnable onLeaveAlliance;        // leave the current alliance
+	private final Consumer<String> onChangeAllianceColor; // owner-only: (colorHex) -> recolor alliance
 	private final StyledButton slugBtn = new StyledButton("Full Slug: Off", 30);
 	private final FadePanel sandboxBox = new FadePanel(); // offline-only tools, fades in on going offline
 	private final JPanel paintClansBox = new JPanel();    // the paint-as roster rows
@@ -175,9 +219,15 @@ class ClanTurfPanel extends PluginPanel
 			ColorPickerManager colorPickerManager, BiConsumer<String, Color> onClanColorChosen,
 			Consumer<Boolean> onSetSlug, Consumer<String> onAddClan, Consumer<String> onSelectClan,
 			Consumer<String> onRemoveClan, BiConsumer<String, String> onRenameClan,
-			Consumer<Boolean> onSetEraser)
+			Consumer<Boolean> onSetEraser, Consumer<String[]> onCreateAlliance,
+			Consumer<String> onJoinAlliance, Runnable onLeaveAlliance,
+			Consumer<String> onChangeAllianceColor)
 	{
 		this.onSetServer = onSetServer;
+		this.onCreateAlliance = onCreateAlliance;
+		this.onJoinAlliance = onJoinAlliance;
+		this.onLeaveAlliance = onLeaveAlliance;
+		this.onChangeAllianceColor = onChangeAllianceColor;
 		this.colorPickerManager = colorPickerManager;
 		this.onClanColorChosen = onClanColorChosen;
 		this.onSetSlug = onSetSlug;
@@ -247,6 +297,16 @@ class ClanTurfPanel extends PluginPanel
 		battlesHeader.setForeground(ColorScheme.BRAND_ORANGE);
 		battlesHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		battlesHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+		battlesHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		battlesHeader.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				toggleBattles();
+			}
+		});
+		renderBattlesHeader();
 
 		battlesBox.setLayout(new BoxLayout(battlesBox, BoxLayout.Y_AXIS));
 		battlesBox.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -270,6 +330,7 @@ class ClanTurfPanel extends PluginPanel
 		// Fixed width so it doesn't collapse in the horizontal controls row (styled buttons default to
 		// a zero preferred width, which is fine only for the full-width offline buttons).
 		serverToggleBtn.setPreferredSize(new Dimension(80, 30));
+		serverToggleBtn.setPreferredSize(new Dimension(80, 30));
 		serverToggleBtn.setMinimumSize(new Dimension(80, 30));
 		serverToggleBtn.setMaximumSize(new Dimension(80, 30));
 		serverToggleBtn.setToolTipText("Online: your claims sync with every clan. Offline: local practice "
@@ -288,6 +349,15 @@ class ClanTurfPanel extends PluginPanel
 		globalHeader.setForeground(ColorScheme.BRAND_ORANGE);
 		globalHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		globalHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+		globalHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		globalHeader.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				toggleGlobal();
+			}
+		});
 
 		globalIntro.setFont(FontManager.getRunescapeSmallFont());
 		globalIntro.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
@@ -330,11 +400,10 @@ class ClanTurfPanel extends PluginPanel
 		globalBox.setLayout(new BoxLayout(globalBox, BoxLayout.Y_AXIS));
 		globalBox.setOpaque(false);
 		globalBox.setAlignmentX(Component.LEFT_ALIGNMENT);
-		globalBox.add(globalHeader);
 		globalBox.add(globalIntro);
 		globalBox.add(countBox);
 		globalBox.add(globalSub);
-		globalBox.setVisible(false);
+		applyGlobalVisibility(); // no data yet -> header and box both hidden
 
 		// Controls row: just the Online/Offline toggle now (Clear moved into the offline sandbox), kept
 		// at its current size and left-aligned. Pinned under the GE-owners headline, above the bars, so
@@ -343,8 +412,10 @@ class ClanTurfPanel extends PluginPanel
 		controls.setLayout(new BoxLayout(controls, BoxLayout.X_AXIS));
 		controls.setOpaque(false);
 		controls.setAlignmentX(Component.LEFT_ALIGNMENT);
-		controls.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		// Max height must fit the 30px button plus this border (2+8), or the button's height goes
+		// unstable when sections below collapse and the layout recomputes.
 		controls.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
+		controls.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
 		controls.add(serverToggleBtn);
 		controls.add(Box.createHorizontalGlue());
 
@@ -355,6 +426,10 @@ class ClanTurfPanel extends PluginPanel
 		top.add(board);
 		top.add(battlesHeader);
 		top.add(battlesBox);
+		buildAllianceSection();
+		top.add(allianceHeader);
+		top.add(allianceBody);
+		top.add(globalHeader);
 		top.add(globalBox);
 
 		// Feedback / bug report: opens the plugin's GitHub issue tracker in the browser. The plugin
@@ -482,7 +557,8 @@ class ClanTurfPanel extends PluginPanel
 			serverToggleBtn.setLabel(serverOn ? "Online" : "Offline");
 			serverToggleBtn.setLabelColor(serverOn
 					? ColorScheme.PROGRESS_COMPLETE_COLOR : ColorScheme.LIGHT_GRAY_COLOR);
-			battlesHeader.setText(serverOn ? "Active battles" : "Offline battles");
+			battlesBase = serverOn ? "Active battles" : "Offline battles";
+			renderBattlesHeader();
 			clearOfflineBtn.setEnabled(offline);
 			// Offline sandbox tools: shown only offline, faded in on the online -> offline switch.
 			sandboxBox.setVisible(offline);
@@ -781,7 +857,8 @@ class ClanTurfPanel extends PluginPanel
 			headline.setText(message);
 			clanHint.setVisible(false);
 			board.setData(new ArrayList<>(), 0, null);
-			globalBox.setVisible(false);
+			globalHasData = false;
+			applyGlobalVisibility();
 		});
 	}
 
@@ -796,10 +873,12 @@ class ClanTurfPanel extends PluginPanel
 		{
 			if (serverTotal <= 0)
 			{
-				globalBox.setVisible(false);
+				globalHasData = false;
+				applyGlobalVisibility();
 				return;
 			}
-			globalBox.setVisible(true);
+			globalHasData = true;
+			applyGlobalVisibility();
 			if (revealCommunityPending)
 			{
 				// Coming online: fade the whole section in, timed to land after the battles cascade.
@@ -1363,6 +1442,581 @@ class ClanTurfPanel extends PluginPanel
 		picker.setLocationRelativeTo(parent);
 		picker.setOnClose(c -> onClanColorChosen.accept(clan, c));
 		picker.setVisible(true);
+	}
+
+	private void toggleBattles()
+	{
+		battlesCollapsed = !battlesCollapsed;
+		battlesBox.setVisible(!battlesCollapsed);
+		renderBattlesHeader();
+		revalidate();
+		repaint();
+	}
+
+	private void renderBattlesHeader()
+	{
+		battlesHeader.setText(battlesBase + (battlesCollapsed ? "  ▸" : "  ▾"));
+	}
+
+	private void toggleGlobal()
+	{
+		globalCollapsed = !globalCollapsed;
+		applyGlobalVisibility();
+		revalidate();
+		repaint();
+	}
+
+	/** Show the Community Claims header/body per whether there's data and whether it's collapsed. The
+	 *  header stays visible (with data) so you can expand it again; only the body collapses. */
+	private void applyGlobalVisibility()
+	{
+		globalHeader.setVisible(globalHasData);
+		globalBox.setVisible(globalHasData && !globalCollapsed);
+		globalHeader.setText("Community Claims" + (globalCollapsed ? "  ▸" : "  ▾"));
+	}
+
+	/** Builds the collapsible Alliance section: a create/join sub-panel and an in-alliance sub-panel. */
+	private void buildAllianceSection()
+	{
+		allianceHeader.setText("Alliance  ▾");
+		allianceHeader.setFont(HEADER_FONT);
+		allianceHeader.setForeground(ColorScheme.BRAND_ORANGE);
+		allianceHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+		allianceHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+		allianceHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		allianceHeader.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				allianceCollapsed = !allianceCollapsed;
+				allianceBody.setVisible(!allianceCollapsed);
+				allianceHeader.setText(allianceCollapsed ? "Alliance  ▸" : "Alliance  ▾");
+				revalidate();
+				repaint();
+			}
+		});
+
+		allianceBody.setLayout(new BoxLayout(allianceBody, BoxLayout.Y_AXIS));
+		allianceBody.setOpaque(false);
+		allianceBody.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		allianceStatus.setFont(FontManager.getRunescapeSmallFont());
+		allianceStatus.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		allianceStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
+		allianceStatus.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+
+		// Create / join (shown when not in an alliance).
+		allianceJoinCreate.setLayout(new BoxLayout(allianceJoinCreate, BoxLayout.Y_AXIS));
+		allianceJoinCreate.setOpaque(false);
+		allianceJoinCreate.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		allianceSwatch.setPreferredSize(new Dimension(24, 24));
+		allianceSwatch.setMaximumSize(new Dimension(24, 24));
+		allianceSwatch.setBackground(createColor);
+		allianceSwatch.setToolTipText("Pick your alliance color");
+		allianceSwatch.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		allianceSwatch.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				openAllianceColorPicker();
+			}
+		});
+		styleField(nameField);
+		styleField(createPass);
+		styleField(joinPass);
+		nameField.setToolTipText("Alliance name");
+		createPass.setToolTipText("Passcode (optional; blank = auto-generated)");
+		joinPass.setToolTipText("Alliance passcode");
+		createBtn.onClick(() ->
+		{
+			if (onCreateAlliance == null)
+			{
+				return;
+			}
+			String nm = nameField.getText().trim();
+			if (nm.isEmpty())
+			{
+				setAllianceStatus("Enter an alliance name.");
+				return;
+			}
+			onCreateAlliance.accept(new String[]{nm, hex6(createColor), createPass.getText().trim()});
+		});
+		joinBtn.onClick(() ->
+		{
+			if (onJoinAlliance != null && !joinPass.getText().trim().isEmpty())
+			{
+				onJoinAlliance.accept(joinPass.getText().trim());
+			}
+		});
+
+		allianceJoinCreate.add(smallLabel("Create an alliance:"));
+		allianceJoinCreate.add(Box.createVerticalStrut(4));
+		allianceJoinCreate.add(smallLabel("Name"));
+		allianceJoinCreate.add(Box.createVerticalStrut(2));
+		allianceJoinCreate.add(nameField);
+		allianceJoinCreate.add(Box.createVerticalStrut(8));
+		allianceJoinCreate.add(smallLabel("Color and passcode"));
+		allianceJoinCreate.add(smallLabel("Leave passcode blank for a random one"));
+		allianceJoinCreate.add(Box.createVerticalStrut(3));
+		allianceJoinCreate.add(row(allianceSwatch, createPass));
+		allianceJoinCreate.add(Box.createVerticalStrut(7));
+		allianceJoinCreate.add(createBtn);
+		allianceJoinCreate.add(Box.createVerticalStrut(14));
+		allianceJoinCreate.add(smallLabel("Join an alliance (enter its passcode):"));
+		allianceJoinCreate.add(Box.createVerticalStrut(3));
+		allianceJoinCreate.add(joinPass);
+		allianceJoinCreate.add(Box.createVerticalStrut(7));
+		allianceJoinCreate.add(joinBtn);
+
+		// In an alliance (shown when joined): color, members, leave.
+		allianceMemberPanel.setLayout(new BoxLayout(allianceMemberPanel, BoxLayout.Y_AXIS));
+		allianceMemberPanel.setOpaque(false);
+		allianceMemberPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		allianceOwnSwatch.setPreferredSize(new Dimension(24, 24));
+		allianceOwnSwatch.setMaximumSize(new Dimension(24, 24));
+		allianceOwnSwatch.setBackground(createColor);
+		allianceMembersLabel.setFont(FontManager.getRunescapeSmallFont());
+		allianceMembersLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		allianceMembersLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		leaveBtn.onClick(() ->
+		{
+			if (onLeaveAlliance == null)
+			{
+				return;
+			}
+			String msg = allianceIsOwnerClan
+					? "This will disband the alliance and remove every clan from it. Are you sure?"
+					: "This will remove your clan from the alliance. Are you sure?";
+			String title = allianceIsOwnerClan ? "Disband alliance" : "Leave alliance";
+			int r = JOptionPane.showConfirmDialog(this, msg, title,
+					JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+			if (r == JOptionPane.YES_OPTION)
+			{
+				onLeaveAlliance.run();
+			}
+		});
+		changeColorBtn.onClick(() ->
+		{
+			if (colorPickerManager == null || onChangeAllianceColor == null)
+			{
+				return;
+			}
+			Window parent = SwingUtilities.getWindowAncestor(this);
+			RuneliteColorPicker picker = colorPickerManager.create(parent,
+					allianceOwnSwatch.getBackground(), "Alliance color", true);
+			picker.setLocationRelativeTo(parent);
+			picker.setOnClose(c -> onChangeAllianceColor.accept(hex6(c)));
+			picker.setVisible(true);
+		});
+		alliancePasscodeLabel.setFont(FontManager.getRunescapeSmallFont());
+		alliancePasscodeLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		alliancePasscodeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		alliancePasscodeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		alliancePasscodeLabel.setVisible(false);
+		alliancePasscodeLabel.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				if (alliancePasscodeValue == null || alliancePasscodeValue.isEmpty())
+				{
+					return;
+				}
+				Toolkit.getDefaultToolkit().getSystemClipboard()
+						.setContents(new StringSelection(alliancePasscodeValue), null);
+				alliancePasscodeLabel.setText("Passcode copied");
+				if (passcodeCopyTimer != null)
+				{
+					passcodeCopyTimer.stop();
+				}
+				passcodeCopyTimer = new Timer(1500, ev -> renderPasscode());
+				passcodeCopyTimer.setRepeats(false);
+				passcodeCopyTimer.start();
+			}
+		});
+		allianceNameLabel.setFont(HEADER_FONT);
+		allianceNameLabel.setForeground(ColorScheme.BRAND_ORANGE);
+		allianceNameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		allianceMembersList.setLayout(new BoxLayout(allianceMembersList, BoxLayout.Y_AXIS));
+		allianceMembersList.setOpaque(false);
+		allianceMembersList.setAlignmentX(Component.LEFT_ALIGNMENT);
+		changePasscodeBtn.onClick(this::openChangePasscode);
+		// The member panel's contents are (re)built by layoutMemberPanel() whenever the view shape changes
+		// (owner vs joined vs read-only), so hidden buttons never leave phantom gaps.
+		allianceMemberPanel.setVisible(false);
+
+		allianceBody.add(allianceStatus);
+		allianceBody.add(allianceJoinCreate);
+		allianceBody.add(allianceMemberPanel);
+	}
+
+	/**
+	 * Update the alliance section: whether we're online, in an alliance, our alliance color, and the
+	 * member list. Called from the plugin as the alliance state changes. Only re-lays out on a real
+	 * state change, so it can't steal focus from the passcode fields while you type.
+	 */
+	void setAlliance(boolean online, boolean inAlliance, boolean canManage, String name, String colorHex,
+			boolean isOwnerClan, java.util.List<String> members, java.util.List<String> kickable)
+	{
+		boolean changed = online != allianceOnline || inAlliance != allianceInAlliance
+				|| canManage != allianceCanManage || isOwnerClan != allianceIsOwnerClan;
+		allianceOnline = online;
+		allianceInAlliance = inAlliance;
+		allianceCanManage = canManage;
+		allianceIsOwnerClan = isOwnerClan;
+		if (!online)
+		{
+			allianceStatus.setText("Alliances are online only.");
+			allianceJoinCreate.setVisible(false);
+			allianceMemberPanel.setVisible(false);
+		}
+		else if (inAlliance)
+		{
+			allianceJoinCreate.setVisible(false);
+			allianceMemberPanel.setVisible(true);
+			allianceNameLabel.setText(name == null || name.isEmpty() ? "Your alliance" : name);
+			Color col = colorHex == null ? null : parseHex(colorHex);
+			// The alliance name renders in the team color directly (no hash-color flash while it loads).
+			allianceNameLabel.setForeground(col != null ? col : ColorScheme.BRAND_ORANGE);
+			if (col != null)
+			{
+				allianceOwnSwatch.setBackground(col);
+				allianceOwnSwatch.repaint();
+			}
+			// The owner clan disbands (kills the alliance); a joined clan just leaves.
+			leaveBtn.setLabel(isOwnerClan ? "Disband alliance" : "Leave alliance");
+			if (!canManage)
+			{
+				allianceStatus.setText(" "); // read-only view: just the alliance name + clan list
+			}
+			// Owner staff get a row per member with a kick X; everyone else gets a plain name list. Both
+			// carry the same "Allied clans:" header so the manage and read-only views line up.
+			boolean owner = canManage && isOwnerClan;
+			if (owner)
+			{
+				rebuildMemberRows(members, kickable);
+			}
+			else
+			{
+				allianceMembersLabel.setText(membersHtml(members));
+			}
+			if (changed)
+			{
+				layoutMemberPanel(owner, canManage);
+			}
+		}
+		else
+		{
+			// Not in an alliance: only Admin+ get the create/join controls.
+			allianceJoinCreate.setVisible(canManage);
+			allianceMemberPanel.setVisible(false);
+			if (!canManage)
+			{
+				allianceStatus.setText("Your clan is not in an alliance.");
+			}
+			else if (allianceStatus.getText() == null || allianceStatus.getText().length() < 2)
+			{
+				allianceStatus.setText("<html><body style='width:165px'>Team up so allied clans "
+						+ "don't take each other's tiles.</body></html>");
+			}
+		}
+		// Hide the status line entirely when it's blank, so the name + clans sit up under the header
+		// instead of leaving a gap.
+		String st = allianceStatus.getText();
+		allianceStatus.setVisible(st != null && !st.trim().isEmpty());
+		if (changed)
+		{
+			revalidate();
+			repaint();
+		}
+	}
+
+	/** (Re)build the in-alliance panel for the current view: owner staff get the full toolkit, a joined
+	 *  clan's staff get just Leave, and a read-only member gets name + clans. Called only when the view
+	 *  shape changes, so hidden buttons never leave phantom gaps and the three action buttons stay evenly
+	 *  spaced. */
+	private void layoutMemberPanel(boolean owner, boolean canManage)
+	{
+		allianceMemberPanel.removeAll();
+		allianceMemberPanel.add(allianceNameLabel);
+		allianceMemberPanel.add(owner ? allianceMembersList : allianceMembersLabel);
+		if (owner)
+		{
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(alliancePasscodeLabel);
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(changePasscodeBtn);
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(changeColorBtn);
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(leaveBtn);
+		}
+		else if (canManage)
+		{
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(leaveBtn);
+		}
+		allianceMemberPanel.revalidate();
+		allianceMemberPanel.repaint();
+	}
+
+	/** Owner clan only: show the alliance passcode with click-to-copy, or hide it when null/blank. */
+	void setAlliancePasscode(String code)
+	{
+		if (code == null || code.isEmpty())
+		{
+			alliancePasscodeValue = null;
+			alliancePasscodeLabel.setVisible(false);
+			return;
+		}
+		alliancePasscodeValue = code;
+		renderPasscode();
+		alliancePasscodeLabel.setVisible(true);
+	}
+
+	private void renderPasscode()
+	{
+		if (alliancePasscodeValue != null && !alliancePasscodeValue.isEmpty())
+		{
+			alliancePasscodeLabel.setText("Passcode: " + alliancePasscodeValue + " (click to copy)");
+		}
+	}
+
+	/** Owner staff view: one row per member clan; each non-owner clan gets a small "x" that kicks + blocks
+	 *  it. Rebuilt only when the roster changes, so it doesn't flicker on every refresh. */
+	private void rebuildMemberRows(java.util.List<String> members, java.util.List<String> kickable)
+	{
+		java.util.Set<String> kick = new java.util.HashSet<>();
+		if (kickable != null)
+		{
+			for (String k : kickable)
+			{
+				kick.add(k.toLowerCase());
+			}
+		}
+		String sig = members + "|" + kick;
+		if (sig.equals(membersRowsSig))
+		{
+			return;
+		}
+		membersRowsSig = sig;
+		allianceMembersList.removeAll();
+		allianceMembersList.add(smallLabel("Allied clans:")); // match the read-only view's header
+		for (String m : members)
+		{
+			boolean canKick = kick.contains(m.toLowerCase());
+			allianceMembersList.add(clanRow("• " + m, canKick ? "x" : null, () -> confirmKick(m)));
+		}
+		allianceMembersList.revalidate();
+		allianceMembersList.repaint();
+	}
+
+	/** A "&lt;clan name&gt; ......... [x]" row. actionLabel null = just the name, no button. */
+	private JPanel clanRow(String clan, String actionLabel, Runnable action)
+	{
+		JPanel p = new JPanel();
+		p.setLayout(new BoxLayout(p, BoxLayout.X_AXIS));
+		p.setOpaque(false);
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+		p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
+		JLabel name = new JLabel(clan);
+		name.setFont(FontManager.getRunescapeSmallFont());
+		name.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		p.add(name);
+		p.add(Box.createHorizontalGlue());
+		if (actionLabel != null && action != null)
+		{
+			JLabel x = new JLabel(actionLabel);
+			x.setFont(FontManager.getRunescapeSmallFont());
+			x.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			x.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			x.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 2));
+			x.addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseEntered(MouseEvent e)
+				{
+					x.setForeground(Color.WHITE);
+				}
+
+				@Override
+				public void mouseExited(MouseEvent e)
+				{
+					x.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+				}
+
+				@Override
+				public void mouseReleased(MouseEvent e)
+				{
+					action.run();
+				}
+			});
+			p.add(x);
+		}
+		return p;
+	}
+
+	private void confirmKick(String clan)
+	{
+		if (onKickClan == null)
+		{
+			return;
+		}
+		int r = JOptionPane.showConfirmDialog(this,
+				"Remove " + clan + " from the alliance and block it from rejoining? Are you sure?",
+				"Remove clan", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+		if (r == JOptionPane.YES_OPTION)
+		{
+			onKickClan.accept(clan);
+		}
+	}
+
+	/** Owner staff: popup to change the passcode. Enter the current code plus a new one. */
+	private void openChangePasscode()
+	{
+		if (onChangePasscode == null)
+		{
+			return;
+		}
+		JTextField oldField = new JTextField();
+		JTextField newField = new JTextField();
+		JPanel form = new JPanel(new java.awt.GridLayout(0, 1, 0, 4));
+		form.add(new JLabel("Current passcode"));
+		form.add(oldField);
+		form.add(new JLabel("New passcode"));
+		form.add(newField);
+		int r = JOptionPane.showConfirmDialog(this, form, "Change passcode",
+				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+		if (r == JOptionPane.OK_OPTION)
+		{
+			String o = oldField.getText().trim();
+			String n = newField.getText().trim();
+			if (!o.isEmpty() && !n.isEmpty())
+			{
+				onChangePasscode.accept(o, n);
+			}
+		}
+	}
+
+	/** Wire the owner-only alliance actions (kick, change passcode) after construction. */
+	void setAllianceOwnerHandlers(Consumer<String> onKick, BiConsumer<String, String> onChangePass)
+	{
+		this.onKickClan = onKick;
+		this.onChangePasscode = onChangePass;
+	}
+
+	/** Show a one-line status/result under the Alliance header (e.g. "Passcode taken"). */
+	void setAllianceStatus(String text)
+	{
+		boolean blank = text == null || text.trim().isEmpty();
+		allianceStatus.setText(blank ? " " : text);
+		allianceStatus.setVisible(!blank);
+		if (statusClearTimer != null)
+		{
+			statusClearTimer.stop();
+		}
+		if (!blank)
+		{
+			// Action results (created / disbanded / errors) are transient - clear them after a few seconds
+			// so they don't linger above the alliance name. Persistent hints bypass this method.
+			statusClearTimer = new Timer(3500, e ->
+			{
+				allianceStatus.setText(" ");
+				allianceStatus.setVisible(false);
+				revalidate();
+				repaint();
+			});
+			statusClearTimer.setRepeats(false);
+			statusClearTimer.start();
+		}
+		revalidate();
+		repaint();
+	}
+
+	private void openAllianceColorPicker()
+	{
+		if (colorPickerManager == null)
+		{
+			return;
+		}
+		Window parent = SwingUtilities.getWindowAncestor(this);
+		RuneliteColorPicker picker = colorPickerManager.create(parent, createColor, "Alliance color", true);
+		picker.setLocationRelativeTo(parent);
+		picker.setOnClose(c ->
+		{
+			createColor = c;
+			allianceSwatch.setBackground(c);
+			allianceSwatch.repaint();
+		});
+		picker.setVisible(true);
+	}
+
+	private JLabel smallLabel(String text)
+	{
+		JLabel l = new JLabel(text);
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		l.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return l;
+	}
+
+	private static void styleField(JTextField f)
+	{
+		f.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+		f.setAlignmentX(Component.LEFT_ALIGNMENT);
+	}
+
+	/** A left-aligned horizontal row of a fixed-size swatch/control and a stretchy control beside it. */
+	private static JPanel row(Component a, Component b)
+	{
+		JPanel p = new JPanel();
+		p.setLayout(new BoxLayout(p, BoxLayout.X_AXIS));
+		p.setOpaque(false);
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+		p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		p.add(a);
+		p.add(Box.createHorizontalStrut(6));
+		p.add(b);
+		return p;
+	}
+
+	private static String hex6(Color c)
+	{
+		return String.format("%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
+	}
+
+	private static Color parseHex(String hex)
+	{
+		try
+		{
+			return new Color(Integer.parseInt(hex, 16));
+		}
+		catch (NumberFormatException e)
+		{
+			return null;
+		}
+	}
+
+	private static String membersHtml(java.util.List<String> members)
+	{
+		if (members == null || members.isEmpty())
+		{
+			return "No members.";
+		}
+		StringBuilder sb = new StringBuilder("<html>Allied clans:");
+		for (String m : members)
+		{
+			sb.append("<br>&bull; ").append(escapeHtml(m)); // no trailing <br>, so no dead gap below
+		}
+		return sb.append("</html>").toString();
+	}
+
+	private static String escapeHtml(String s)
+	{
+		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 
 	/**
