@@ -44,6 +44,7 @@ import net.runelite.api.Point;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -65,20 +66,55 @@ class ClanTurfWorldMapOverlay extends Overlay
 	private final WorldMapOverlay worldMapOverlay;
 	private final ClanTurfPlugin plugin;
 	private final ClanTurfConfig config;
+	private final SpriteManager spriteManager;
+	private final java.util.Map<Integer, java.awt.image.BufferedImage> iconCache = new java.util.HashMap<>();
+	private final java.util.Set<Integer> iconRequested = new java.util.HashSet<>();
 
 	@Inject
 	ClanTurfWorldMapOverlay(Client client, WorldMapOverlay worldMapOverlay, ClanTurfPlugin plugin,
-			ClanTurfConfig config)
+			ClanTurfConfig config, SpriteManager spriteManager)
 	{
 		this.client = client;
 		this.worldMapOverlay = worldMapOverlay;
 		this.plugin = plugin;
 		this.config = config;
+		this.spriteManager = spriteManager;
 		setPosition(OverlayPosition.DYNAMIC);
 		// ABOVE_WIDGETS renders after the whole world map interface is drawn - including the World Map
 		// plugin's teleport-destination points - so our fill/outline/name land on top of them. render()
 		// gates on the map being open and clips to its viewport so we don't paint over the rest of the UI.
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
+	}
+
+	/**
+	 * Cached clan-symbol sprite. Loads asynchronously the first time an id is seen (a bare getSprite only
+	 * hits the shared cache and never triggers a load, so the map symbol used to stay blank until something
+	 * else - the sidebar picker - happened to load that sprite). Returns null until the load lands; the map
+	 * repaints every frame while open, so the symbol appears on the next frame. The async callback runs on
+	 * the client thread, same as render(), so touching the cache here needs no extra synchronization.
+	 */
+	private java.awt.image.BufferedImage iconImage(int id)
+	{
+		if (id <= 0)
+		{
+			return null;
+		}
+		java.awt.image.BufferedImage cached = iconCache.get(id);
+		if (cached != null)
+		{
+			return cached;
+		}
+		if (iconRequested.add(id))
+		{
+			spriteManager.getSpriteAsync(id, 0, img ->
+			{
+				if (img != null)
+				{
+					iconCache.put(id, img);
+				}
+			});
+		}
+		return null;
 	}
 
 	@Override
@@ -135,8 +171,10 @@ class ClanTurfWorldMapOverlay extends Overlay
 				// Font scales up with zoom (from the GE's on-screen width), floored so it stays readable
 				// zoomed out and capped so it plateaus at the size that looks right and doesn't keep
 				// ballooning as you zoom further in. Raise/lower the 24 to taste.
-				int size = Math.min(24, Math.max(16, Math.round(geWidthPx / 12f)));
-				Font font = FontManager.getRunescapeBoldFont().deriveFont((float) size);
+				// The RuneScape font is a pixel font that only stays crisp at its native size; scaling it up
+				// (deriveFont) blurs it as you zoom in. Keep it at native and let the icon carry the scale.
+				Font font = FontManager.getRunescapeBoldFont();
+				int size = font.getSize();
 				graphics.setFont(font);
 				FontMetrics fm = graphics.getFontMetrics();
 
@@ -147,7 +185,17 @@ class ClanTurfWorldMapOverlay extends Overlay
 				String[] words = owner.trim().split("\\s+");
 				int westShift = Math.round(geWidthPx / 20f);
 				int lineH = fm.getHeight();
-				int firstBaseline = c.getY() - words.length * lineH / 2 + fm.getAscent();
+				int nameH = words.length * lineH;
+
+				// The alliance symbol (if any) sits large and centered ABOVE the name; the icon+name pair is
+				// centered on the GE together, so the name slides down to make room.
+				java.awt.image.BufferedImage iconImg = iconImage(plugin.getWorldMapOwnerIcon());
+				int iconSize = iconImg == null ? 0 : Math.min(52, Math.max(28, Math.round(geWidthPx / 6f)));
+				int iconGap = iconImg == null ? 0 : 3;
+				int blockTop = c.getY() - (iconSize + iconGap + nameH) / 2;
+				int iconX = c.getX() - westShift - iconSize / 2;
+				int iconY = blockTop;
+				int firstBaseline = blockTop + iconSize + iconGap + fm.getAscent();
 
 				// Accumulate every word's glyph outlines into one shape (body) with a matching offset
 				// shadow, so the fill and the gleam apply to the whole name at once.
@@ -166,6 +214,11 @@ class ClanTurfWorldMapOverlay extends Overlay
 				graphics.fill(shadow);
 				graphics.setColor(Color.WHITE); // body sits steady in white; the clan color is the gleam
 				graphics.fill(body);
+
+				if (iconImg != null)
+				{
+					graphics.drawImage(iconImg, iconX, iconY, iconSize, iconSize, null);
+				}
 
 				// A single clan-color gleam sweeps across the name, then rests. Speed (time to cross),
 				// pause (dwell between sweeps), width, feather, and opacity are all set in Appearance.

@@ -59,15 +59,19 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.Icon;
+import java.awt.Dialog;
+import java.awt.Image;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
@@ -103,7 +107,14 @@ class ClanTurfPanel extends PluginPanel
 	private final JLabel header = new JLabel();
 	private final JLabel headline = new JLabel();
 	private final JLabel clanHint = new JLabel();
-	private final Leaderboard board = new Leaderboard(this::openColorPicker);
+	private java.util.function.ToIntFunction<String> allianceIconLookup = s -> 0; // display name -> icon id
+	private java.util.function.Function<String, java.util.List<String>> allianceRosterLookup =
+			d -> java.util.Collections.emptyList(); // display name -> member clans
+	private Map<String, Long> allianceTileCounts = java.util.Collections.emptyMap(); // lower(clan) -> tiles held
+	private final java.util.Map<Integer, java.awt.image.BufferedImage> spriteRawCache = new java.util.HashMap<>();
+	private final java.util.Set<Integer> spriteRequested = new java.util.HashSet<>();
+	private final Leaderboard board = new Leaderboard(this::openColorPicker, this::leaderboardRoster,
+			this::leaderboardAllianceIconId, this::leaderboardIconImage);
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
 
@@ -129,11 +140,23 @@ class ClanTurfPanel extends PluginPanel
 	private Timer passcodeCopyTimer;                           // reverts the "copied" flash back to the code
 	private Timer statusClearTimer;                            // clears transient alliance status messages
 	private final StyledButton changePasscodeBtn = new StyledButton("Change passcode", 26);
+	private final StyledButton changeNameBtn = new StyledButton("Change name", 26);
+	private final StyledButton changeIconBtn = new StyledButton("Change icon", 26);
+	private final JLabel allianceIconLabel = new JLabel();  // symbol to the left of the alliance name
+	private final JLabel allianceIconLabelR = new JLabel(); // matching symbol to the right of the name
+	private final JPanel allianceNameRow = new JPanel();    // [icon][name][icon] side by side
+	private int allianceIconValue;                          // current alliance symbol sprite id (0 = none)
+	private final java.util.Map<Integer, ImageIcon> iconCache = new java.util.HashMap<>(); // spriteId -> icon
+	private SpriteManager spriteManager;                    // loads clan-symbol sprites from the player cache
+	private Consumer<Integer> onChangeIcon;                 // owner: set the alliance symbol
 	private final JPanel allianceMembersList = new JPanel(); // owner view: member rows, each with a kick X
 	private String membersRowsSig; // guard so the member rows only rebuild when they actually change
 	private Consumer<String> onKickClan;    // owner: kick + block an allied clan
+	private Consumer<String> onChangeName;  // owner: rename the alliance
 	private BiConsumer<String, String> onChangePasscode; // owner: (old, new) change the passcode
 	private Color createColor = new Color(0x8a, 0x2b, 0xe2); // default alliance color (purple)
+	private int createIcon = 3024; // symbol chosen in the create form (Skull default)
+	private final JButton createIconBtn = new JButton(); // create form: click to pick the alliance symbol
 	private boolean allianceCollapsed = false;
 	private boolean allianceInAlliance = false;
 	private boolean allianceOnline = true;
@@ -1071,8 +1094,10 @@ class ClanTurfPanel extends PluginPanel
 	 */
 	void update(Collection<ClanTurfPoint> claims, int world, int totalTiles, String committedLeader,
 			String myClan, ClanTurfBattle currentBattle, ClanTurfStore.ConnectionStatus status,
-			boolean clanHintDue)
+			boolean clanHintDue, Map<String, Long> perClanTiles)
 	{
+		final Map<String, Long> perClanTilesFinal =
+				perClanTiles == null ? java.util.Collections.emptyMap() : perClanTiles;
 		Map<String, Long> counts = claims.stream()
 				.collect(Collectors.groupingBy(ClanTurfPoint::getClanName, Collectors.counting()));
 
@@ -1173,6 +1198,7 @@ class ClanTurfPanel extends PluginPanel
 				renderHeadline();
 			}
 
+			allianceTileCounts = perClanTilesFinal; // per-clan breakdown for the expanded-alliance drawer
 			board.setData(ordered, totalTiles, myClan);
 		});
 	}
@@ -1413,6 +1439,7 @@ class ClanTurfPanel extends PluginPanel
 		double y;            // displayed top-of-row pixel (eases toward targetY)
 		double targetY;
 		int rank;            // target rank (1-based), snapped
+		int icon;            // alliance symbol sprite id for this row (0 = not an alliance, no icon)
 		boolean leaving;     // dropped out of the standings, animating out then removed
 		double alpha = 1.0;  // row opacity; eases to 0 while leaving so it fades out, not cuts
 
@@ -1478,11 +1505,12 @@ class ClanTurfPanel extends PluginPanel
 	/** Builds the collapsible Alliance section: a create/join sub-panel and an in-alliance sub-panel. */
 	private void buildAllianceSection()
 	{
-		allianceHeader.setText("Alliance  ▾");
+		updateAllianceHeaderText();
 		allianceHeader.setFont(HEADER_FONT);
 		allianceHeader.setForeground(ColorScheme.BRAND_ORANGE);
 		allianceHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		allianceHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+		allianceHeader.setToolTipText("Team up so allied clans don't take each other's tiles.");
 		allianceHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		allianceHeader.addMouseListener(new MouseAdapter()
 		{
@@ -1491,7 +1519,7 @@ class ClanTurfPanel extends PluginPanel
 			{
 				allianceCollapsed = !allianceCollapsed;
 				allianceBody.setVisible(!allianceCollapsed);
-				allianceHeader.setText(allianceCollapsed ? "Alliance  ▸" : "Alliance  ▾");
+				updateAllianceHeaderText();
 				revalidate();
 				repaint();
 			}
@@ -1511,8 +1539,8 @@ class ClanTurfPanel extends PluginPanel
 		allianceJoinCreate.setOpaque(false);
 		allianceJoinCreate.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		allianceSwatch.setPreferredSize(new Dimension(24, 24));
-		allianceSwatch.setMaximumSize(new Dimension(24, 24));
+		allianceSwatch.setPreferredSize(new Dimension(36, 36));
+		allianceSwatch.setMaximumSize(new Dimension(36, 36));
 		allianceSwatch.setBackground(createColor);
 		allianceSwatch.setToolTipText("Pick your alliance color");
 		allianceSwatch.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -1528,7 +1556,7 @@ class ClanTurfPanel extends PluginPanel
 		styleField(createPass);
 		styleField(joinPass);
 		nameField.setToolTipText("Alliance name");
-		createPass.setToolTipText("Passcode (optional; blank = auto-generated)");
+		createPass.setToolTipText("Leave blank and a random passcode is generated for you");
 		joinPass.setToolTipText("Alliance passcode");
 		createBtn.onClick(() ->
 		{
@@ -1542,8 +1570,18 @@ class ClanTurfPanel extends PluginPanel
 				setAllianceStatus("Enter an alliance name.");
 				return;
 			}
-			onCreateAlliance.accept(new String[]{nm, hex6(createColor), createPass.getText().trim()});
+			onCreateAlliance.accept(new String[]{nm, hex6(createColor),
+					createPass.getText().trim(), String.valueOf(createIcon)});
 		});
+		createIconBtn.setPreferredSize(new Dimension(36, 36));
+		createIconBtn.setMaximumSize(new Dimension(36, 36));
+		createIconBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		createIconBtn.setFocusable(false);
+		createIconBtn.addActionListener(e -> openIconPicker(id ->
+		{
+			createIcon = id;
+			iconFor(id, ic -> createIconBtn.setIcon(scaleIcon(ic, 28)));
+		}));
 		joinBtn.onClick(() ->
 		{
 			if (onJoinAlliance != null && !joinPass.getText().trim().isEmpty())
@@ -1558,13 +1596,27 @@ class ClanTurfPanel extends PluginPanel
 		allianceJoinCreate.add(Box.createVerticalStrut(2));
 		allianceJoinCreate.add(nameField);
 		allianceJoinCreate.add(Box.createVerticalStrut(8));
-		allianceJoinCreate.add(smallLabel("Color and passcode"));
-		allianceJoinCreate.add(smallLabel("Leave passcode blank for a random one"));
+		allianceJoinCreate.add(smallLabel("Passcode"));
+		allianceJoinCreate.add(Box.createVerticalStrut(2));
+		allianceJoinCreate.add(createPass);
+		allianceJoinCreate.add(Box.createVerticalStrut(8));
+		allianceJoinCreate.add(smallLabel("Pick an alliance color and symbol."));
 		allianceJoinCreate.add(Box.createVerticalStrut(3));
-		allianceJoinCreate.add(row(allianceSwatch, createPass));
+		JPanel colorSymbolRow = new JPanel();
+		colorSymbolRow.setLayout(new BoxLayout(colorSymbolRow, BoxLayout.X_AXIS));
+		colorSymbolRow.setOpaque(false);
+		colorSymbolRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		colorSymbolRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+		colorSymbolRow.add(allianceSwatch);
+		colorSymbolRow.add(Box.createHorizontalStrut(8));
+		colorSymbolRow.add(createIconBtn);
+		colorSymbolRow.add(Box.createHorizontalGlue());
+		allianceJoinCreate.add(colorSymbolRow);
 		allianceJoinCreate.add(Box.createVerticalStrut(7));
 		allianceJoinCreate.add(createBtn);
-		allianceJoinCreate.add(Box.createVerticalStrut(14));
+		allianceJoinCreate.add(Box.createVerticalStrut(10));
+		allianceJoinCreate.add(thinDivider());
+		allianceJoinCreate.add(Box.createVerticalStrut(10));
 		allianceJoinCreate.add(smallLabel("Join an alliance (enter its passcode):"));
 		allianceJoinCreate.add(Box.createVerticalStrut(3));
 		allianceJoinCreate.add(joinPass);
@@ -1640,10 +1692,29 @@ class ClanTurfPanel extends PluginPanel
 		allianceNameLabel.setFont(HEADER_FONT);
 		allianceNameLabel.setForeground(ColorScheme.BRAND_ORANGE);
 		allianceNameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		// The alliance symbol sits to the left of the name, as one row.
+		allianceIconLabel.setVisible(false);
+		allianceIconLabelR.setVisible(false);
+		allianceNameRow.setLayout(new BoxLayout(allianceNameRow, BoxLayout.X_AXIS));
+		allianceNameRow.setOpaque(false);
+		allianceNameRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		allianceNameRow.add(allianceIconLabel);
+		allianceNameRow.add(Box.createHorizontalStrut(6));
+		allianceNameRow.add(allianceNameLabel);
+		allianceNameRow.add(Box.createHorizontalStrut(6));
+		allianceNameRow.add(allianceIconLabelR);
 		allianceMembersList.setLayout(new BoxLayout(allianceMembersList, BoxLayout.Y_AXIS));
 		allianceMembersList.setOpaque(false);
 		allianceMembersList.setAlignmentX(Component.LEFT_ALIGNMENT);
 		changePasscodeBtn.onClick(this::openChangePasscode);
+		changeNameBtn.onClick(this::openChangeName);
+		changeIconBtn.onClick(() -> openIconPicker(id ->
+		{
+			if (onChangeIcon != null)
+			{
+				onChangeIcon.accept(id);
+			}
+		}));
 		// The member panel's contents are (re)built by layoutMemberPanel() whenever the view shape changes
 		// (owner vs joined vs read-only), so hidden buttons never leave phantom gaps.
 		allianceMemberPanel.setVisible(false);
@@ -1667,6 +1738,7 @@ class ClanTurfPanel extends PluginPanel
 		allianceInAlliance = inAlliance;
 		allianceCanManage = canManage;
 		allianceIsOwnerClan = isOwnerClan;
+		updateAllianceHeaderText();
 		if (!online)
 		{
 			allianceStatus.setText("Alliances are online only.");
@@ -1717,11 +1789,8 @@ class ClanTurfPanel extends PluginPanel
 			{
 				allianceStatus.setText("Your clan is not in an alliance.");
 			}
-			else if (allianceStatus.getText() == null || allianceStatus.getText().length() < 2)
-			{
-				allianceStatus.setText("<html><body style='width:165px'>Team up so allied clans "
-						+ "don't take each other's tiles.</body></html>");
-			}
+			// The "team up..." blurb now lives as a tooltip on the Alliance header, so managers just see
+			// the create/join form here with no extra hint text.
 		}
 		// Hide the status line entirely when it's blank, so the name + clans sit up under the header
 		// instead of leaving a gap.
@@ -1741,12 +1810,17 @@ class ClanTurfPanel extends PluginPanel
 	private void layoutMemberPanel(boolean owner, boolean canManage)
 	{
 		allianceMemberPanel.removeAll();
-		allianceMemberPanel.add(allianceNameLabel);
+		allianceMemberPanel.add(allianceNameRow);
+		allianceMemberPanel.add(Box.createVerticalStrut(6)); // breathing room below the flanking symbols
 		allianceMemberPanel.add(owner ? allianceMembersList : allianceMembersLabel);
 		if (owner)
 		{
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
 			allianceMemberPanel.add(alliancePasscodeLabel);
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(changeNameBtn);
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(changeIconBtn);
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
 			allianceMemberPanel.add(changePasscodeBtn);
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
@@ -1781,7 +1855,8 @@ class ClanTurfPanel extends PluginPanel
 	{
 		if (alliancePasscodeValue != null && !alliancePasscodeValue.isEmpty())
 		{
-			alliancePasscodeLabel.setText("Passcode: " + alliancePasscodeValue + " (click to copy)");
+			alliancePasscodeLabel.setText("<html>Passcode: " + alliancePasscodeValue
+					+ "<br>(click to copy)</html>");
 		}
 	}
 
@@ -1874,6 +1949,29 @@ class ClanTurfPanel extends PluginPanel
 		}
 	}
 
+	/** Owner staff: popup to rename the alliance. */
+	private void openChangeName()
+	{
+		if (onChangeName == null)
+		{
+			return;
+		}
+		JTextField field = new JTextField();
+		JPanel form = new JPanel(new java.awt.GridLayout(0, 1, 0, 4));
+		form.add(new JLabel("New alliance name"));
+		form.add(field);
+		int r = JOptionPane.showConfirmDialog(this, form, "Change name",
+				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+		if (r == JOptionPane.OK_OPTION)
+		{
+			String n = field.getText().trim();
+			if (!n.isEmpty())
+			{
+				onChangeName.accept(n);
+			}
+		}
+	}
+
 	/** Owner staff: popup to change the passcode. Enter the current code plus a new one. */
 	private void openChangePasscode()
 	{
@@ -1901,18 +1999,201 @@ class ClanTurfPanel extends PluginPanel
 		}
 	}
 
-	/** Wire the owner-only alliance actions (kick, change passcode) after construction. */
-	void setAllianceOwnerHandlers(Consumer<String> onKick, BiConsumer<String, String> onChangePass)
+	/** Wire the owner-only alliance actions (kick, rename, change passcode) after construction. */
+	void setAllianceOwnerHandlers(Consumer<String> onKick, Consumer<String> onRename,
+			BiConsumer<String, String> onChangePass, Consumer<Integer> onIcon)
 	{
 		this.onKickClan = onKick;
+		this.onChangeName = onRename;
 		this.onChangePasscode = onChangePass;
+		this.onChangeIcon = onIcon;
+	}
+
+	/** The plugin hands us its SpriteManager so we can load clan-symbol sprites from the player's cache. */
+	void setSpriteManager(SpriteManager sm)
+	{
+		this.spriteManager = sm;
+		iconFor(createIcon, ic -> createIconBtn.setIcon(scaleIcon(ic, 28))); // load the create-form preview
+	}
+
+	/** The plugin wires this so the scoreboard can ask "is this display name an alliance, and which icon?" */
+	void setAllianceIconLookup(java.util.function.ToIntFunction<String> f)
+	{
+		this.allianceIconLookup = f == null ? s -> 0 : f;
+	}
+
+	private int leaderboardAllianceIconId(String display)
+	{
+		return allianceIconLookup.applyAsInt(display);
+	}
+
+	/** The plugin wires this so clicking a bar's symbol can list that alliance's member clans. */
+	void setAllianceRosterLookup(java.util.function.Function<String, java.util.List<String>> f)
+	{
+		this.allianceRosterLookup = f == null ? d -> java.util.Collections.emptyList() : f;
+	}
+
+	/**
+	 * Member clans of an alliance (by its scoreboard display name), each paired with the tiles that clan
+	 * holds in the current world, ranked most-tiles-first. Feeds the inline drawer's per-clan breakdown.
+	 * The roster is server truth (so a clan with 0 tiles this world still shows, at 0); counts are local.
+	 */
+	private java.util.List<Map.Entry<String, Long>> leaderboardRoster(String display)
+	{
+		java.util.List<String> members = allianceRosterLookup.apply(display);
+		java.util.List<Map.Entry<String, Long>> out = new ArrayList<>(members.size());
+		for (String m : members)
+		{
+			long tiles = allianceTileCounts.getOrDefault(m.toLowerCase(java.util.Locale.ROOT), 0L);
+			out.add(new java.util.AbstractMap.SimpleEntry<>(m, tiles));
+		}
+		out.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+		return out;
+	}
+
+	/** Raw clan-symbol sprite for the scoreboard gutter, cached; loads async and repaints when ready. */
+	private java.awt.image.BufferedImage leaderboardIconImage(int id)
+	{
+		if (id <= 0 || spriteManager == null)
+		{
+			return null;
+		}
+		java.awt.image.BufferedImage cached = spriteRawCache.get(id);
+		if (cached != null)
+		{
+			return cached;
+		}
+		if (spriteRequested.add(id)) // first request for this id - load it, then repaint the board
+		{
+			spriteManager.getSpriteAsync(id, 0, img ->
+			{
+				if (img != null)
+				{
+					SwingUtilities.invokeLater(() ->
+					{
+						spriteRawCache.put(id, img);
+						board.repaint();
+					});
+				}
+			});
+		}
+		return null;
+	}
+
+	/** Show the alliance's symbol next to the name; loads the sprite async the first time. 0 = hide. */
+	void setAllianceIcon(int icon)
+	{
+		allianceIconValue = icon;
+		if (icon <= 0)
+		{
+			allianceIconLabel.setIcon(null);
+			allianceIconLabel.setVisible(false);
+			allianceIconLabelR.setIcon(null);
+			allianceIconLabelR.setVisible(false);
+			return;
+		}
+		iconFor(icon, ic ->
+		{
+			if (allianceIconValue == icon)
+			{
+				ImageIcon scaled = scaleIcon(ic, 22);
+				allianceIconLabel.setIcon(scaled);
+				allianceIconLabel.setVisible(true);
+				allianceIconLabelR.setIcon(scaled);
+				allianceIconLabelR.setVisible(true);
+				revalidate();
+				repaint();
+			}
+		});
+	}
+
+	/** Popup grid of the 27 clan symbols; clicking one passes its sprite id to {@code onPick}. */
+	private void openIconPicker(Consumer<Integer> onPick)
+	{
+		if (onPick == null)
+		{
+			return;
+		}
+		Window parent = SwingUtilities.getWindowAncestor(this);
+		JDialog dlg = new JDialog(parent, "Choose alliance symbol", Dialog.ModalityType.APPLICATION_MODAL);
+		JPanel grid = new JPanel(new java.awt.GridLayout(0, 6, 4, 4));
+		grid.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		grid.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		for (int id = ICON_MIN; id <= ICON_MAX; id++)
+		{
+			final int fid = id;
+			JButton cell = new JButton();
+			cell.setPreferredSize(new Dimension(42, 42));
+			cell.setFocusable(false);
+			iconFor(id, ic -> cell.setIcon(scaleIcon(ic, 32)));
+			cell.addActionListener(e ->
+			{
+				onPick.accept(fid);
+				dlg.dispose();
+			});
+			grid.add(cell);
+		}
+		dlg.add(grid);
+		dlg.pack();
+		dlg.setLocationRelativeTo(parent);
+		dlg.setVisible(true);
+	}
+
+	/** Fetch a clan-symbol icon, cached; runs {@code ready} on the EDT once it's available. */
+	private void iconFor(int id, Consumer<ImageIcon> ready)
+	{
+		ImageIcon cached = iconCache.get(id);
+		if (cached != null)
+		{
+			ready.accept(cached);
+			return;
+		}
+		if (spriteManager == null)
+		{
+			return;
+		}
+		spriteManager.getSpriteAsync(id, 0, img ->
+		{
+			if (img == null)
+			{
+				return;
+			}
+			ImageIcon ic = new ImageIcon(img);
+			SwingUtilities.invokeLater(() ->
+			{
+				iconCache.put(id, ic);
+				ready.accept(ic);
+			});
+		});
+	}
+
+	private static ImageIcon scaleIcon(ImageIcon ic, int size)
+	{
+		return new ImageIcon(ic.getImage().getScaledInstance(size, size, Image.SCALE_SMOOTH));
+	}
+
+	private static final int ICON_MIN = 3024; // first clan-symbol sprite id (27 contiguous: 3024-3050)
+	private static final int ICON_MAX = 3050;
+
+	/** The header shows the collapse arrow. Managers see "Alliance Tools" with a tooltip noting the controls
+	 *  inside are Admin+ only; everyone else just sees "Alliance". */
+	private void updateAllianceHeaderText()
+	{
+		String base = allianceCanManage ? "Alliance Tools" : "Alliance";
+		allianceHeader.setText(base + (allianceCollapsed ? "  ▸" : "  ▾"));
+		allianceHeader.setToolTipText(allianceCanManage ? "Admin only options." : null);
 	}
 
 	/** Show a one-line status/result under the Alliance header (e.g. "Passcode taken"). */
 	void setAllianceStatus(String text)
 	{
 		boolean blank = text == null || text.trim().isEmpty();
-		allianceStatus.setText(blank ? " " : text);
+		// Wrap in HTML so long results (e.g. the weekly-rename message) flow onto multiple lines in the
+		// narrow panel instead of being cut off. Already-HTML text is passed through untouched.
+		String shown = blank ? " "
+				: (text.startsWith("<html") ? text
+				: "<html><body style='width:160px'>" + text + "</body></html>");
+		allianceStatus.setText(shown);
 		allianceStatus.setVisible(!blank);
 		if (statusClearTimer != null)
 		{
@@ -1961,6 +2242,17 @@ class ClanTurfPanel extends PluginPanel
 		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		l.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return l;
+	}
+
+	/** A full-width 1px horizontal rule, matching the divider style used in the Active battles rows. */
+	private static JComponent thinDivider()
+	{
+		JPanel d = new JPanel();
+		d.setBackground(ColorScheme.MEDIUM_GRAY_COLOR);
+		d.setPreferredSize(new Dimension(0, 1));
+		d.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+		d.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return d;
 	}
 
 	private static void styleField(JTextField f)
@@ -2047,11 +2339,26 @@ class ClanTurfPanel extends PluginPanel
 		private boolean opened;          // snap the very first fill (login/open); animate re-entries
 		private final Timer timer;
 		private final Consumer<String> onClickClan; // clicking a bar -> recolor that clan
-		private String hoveredClan;                 // bar under the cursor, for the hover highlight
+		// display name -> member clans each paired with the tiles it holds (for the inline drawer breakdown)
+		private final java.util.function.Function<String, java.util.List<Map.Entry<String, Long>>> rosterLookup;
+		private final java.util.function.ToIntFunction<String> allianceIconId; // display name -> icon id (0=none)
+		private final java.util.function.IntFunction<java.awt.image.BufferedImage> iconImage; // id -> sprite
+		private static final int ICON_GUTTER = 32;  // right-side space reserved on every bar for the symbol
+		private static final int EXP_PAD = 6;       // inner padding of the inline alliance-info drawer
+		private static final int EXP_LINE = 15;     // line height inside the drawer
+		private String hoveredBarClan;              // bar under the cursor (bar hover highlight)
+		private String hoveredIconClan;             // symbol under the cursor (icon hover highlight)
+		private String expandedClan;                // alliance row whose inline info drawer is open, or null
 
-		Leaderboard(Consumer<String> onClickClan)
+		Leaderboard(Consumer<String> onClickClan,
+				java.util.function.Function<String, java.util.List<Map.Entry<String, Long>>> rosterLookup,
+				java.util.function.ToIntFunction<String> allianceIconId,
+				java.util.function.IntFunction<java.awt.image.BufferedImage> iconImage)
 		{
 			this.onClickClan = onClickClan;
+			this.rosterLookup = rosterLookup;
+			this.allianceIconId = allianceIconId;
+			this.iconImage = iconImage;
 			setForeground(Color.WHITE);
 			timer = new Timer(16, e -> tick());
 			MouseAdapter ma = new MouseAdapter()
@@ -2059,22 +2366,31 @@ class ClanTurfPanel extends PluginPanel
 				@Override
 				public void mouseMoved(MouseEvent e)
 				{
-					setHover(clanAt(e.getY()));
+					updateHover(e.getX(), e.getY());
 				}
 
 				@Override
 				public void mouseExited(MouseEvent e)
 				{
-					setHover(null);
+					clearHover();
 				}
 
 				@Override
 				public void mousePressed(MouseEvent e)
 				{
-					String clan = clanAt(e.getY());
-					if (clan != null && Leaderboard.this.onClickClan != null)
+					Row r = rowAt(e.getY());
+					if (r == null)
 					{
-						Leaderboard.this.onClickClan.accept(clan);
+						return;
+					}
+					int bw = getWidth() - ICON_GUTTER;
+					if (r.icon > 0 && e.getX() >= bw)
+					{
+						toggleExpand(r.clan); // clicked the alliance symbol -> open/close its info drawer
+					}
+					else if (Leaderboard.this.onClickClan != null)
+					{
+						Leaderboard.this.onClickClan.accept(r.clan); // clicked the bar -> recolor
 					}
 				}
 			};
@@ -2082,29 +2398,70 @@ class ClanTurfPanel extends PluginPanel
 			addMouseMotionListener(ma);
 		}
 
-		/** The clan whose bar currently sits under mouse-y, or null. */
-		private String clanAt(int my)
+		/** The row whose bar currently sits under mouse-y, or null. */
+		private Row rowAt(int my)
 		{
 			for (Row r : rows.values())
 			{
 				int top = (int) Math.round(r.y);
 				if (!r.leaving && my >= top && my < top + ROW_H)
 				{
-					return r.clan;
+					return r;
 				}
 			}
 			return null;
 		}
 
-		private void setHover(String clan)
+		/** Split hover state from a cursor position: symbol gutter lights the icon, elsewhere lights the bar. */
+		private void updateHover(int mx, int my)
 		{
-			if (!java.util.Objects.equals(clan, hoveredClan))
+			Row r = rowAt(my);
+			String bar = null;
+			String icon = null;
+			if (r != null)
 			{
-				hoveredClan = clan;
-				setCursor(clan != null
+				int bw = getWidth() - ICON_GUTTER;
+				if (r.icon > 0 && mx >= bw)
+				{
+					icon = r.clan;
+				}
+				else
+				{
+					bar = r.clan;
+				}
+			}
+			setHover(bar, icon);
+		}
+
+		private void clearHover()
+		{
+			setHover(null, null);
+		}
+
+		private void setHover(String bar, String icon)
+		{
+			if (!java.util.Objects.equals(bar, hoveredBarClan)
+					|| !java.util.Objects.equals(icon, hoveredIconClan))
+			{
+				hoveredBarClan = bar;
+				hoveredIconClan = icon;
+				setCursor((bar != null || icon != null)
 						? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
 				repaint();
 			}
+		}
+
+		/** Open the inline info drawer under an alliance row, or close it if that row is already open. */
+		private void toggleExpand(String clan)
+		{
+			expandedClan = java.util.Objects.equals(expandedClan, clan) ? null : clan;
+			relayout();
+			updatePreferredSize();
+			if (!timer.isRunning())
+			{
+				timer.start();
+			}
+			repaint();
 		}
 
 		void setData(List<Entry> entries, int totalTiles, String myClan)
@@ -2137,22 +2494,30 @@ class ClanTurfPanel extends PluginPanel
 					rows.put(e.clan, r);
 				}
 				r.color = e.color;
+				r.icon = allianceIconId == null ? 0 : allianceIconId.applyAsInt(e.clan);
 				r.targetTiles = e.tiles;
-				r.targetY = slot * PITCH;
 				r.rank = slot + 1;
 				r.leaving = false;
 				slot++;
 			}
-			// Parked leavers sit below the survivors and shrink to nothing.
+			// Parked leavers shrink to nothing (relayout sits them below the survivors).
 			for (Row r : rows.values())
 			{
 				if (r.leaving)
 				{
 					r.targetTiles = 0;
-					r.targetY = slot * PITCH;
-					slot++;
 				}
 			}
+			// An alliance that has left the board (or lost its symbol) can't keep its drawer open.
+			if (expandedClan != null)
+			{
+				Row ex = rows.get(expandedClan);
+				if (ex == null || ex.leaving || ex.icon <= 0)
+				{
+					expandedClan = null;
+				}
+			}
+			relayout();
 
 			if (wasEmpty && !opened)
 			{
@@ -2223,10 +2588,53 @@ class ClanTurfPanel extends PluginPanel
 
 		private void updatePreferredSize()
 		{
-			int h = rows.size() * PITCH; // 0 when empty, so it collapses fully out of GE range
+			int h = 0; // 0 when empty, so it collapses fully out of GE range
+			for (Row r : rows.values())
+			{
+				h += PITCH;
+				if (r.icon > 0 && r.clan.equalsIgnoreCase(expandedClan))
+				{
+					h += drawerHeight(r);
+				}
+			}
 			setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH, h));
 			setMaximumSize(new Dimension(Integer.MAX_VALUE, h));
 			revalidate();
+		}
+
+		/** Assign each row's target Y in rank order, opening a gap under the expanded alliance row. */
+		private void relayout()
+		{
+			List<Row> survivors = new ArrayList<>();
+			List<Row> leavers = new ArrayList<>();
+			for (Row r : rows.values())
+			{
+				(r.leaving ? leavers : survivors).add(r);
+			}
+			survivors.sort(java.util.Comparator.comparingInt(a -> a.rank));
+			int y = 0;
+			for (Row r : survivors)
+			{
+				r.targetY = y;
+				y += PITCH;
+				if (r.icon > 0 && r.clan.equalsIgnoreCase(expandedClan))
+				{
+					y += drawerHeight(r);
+				}
+			}
+			for (Row r : leavers)
+			{
+				r.targetY = y;
+				y += PITCH;
+			}
+		}
+
+		/** Pixel height of the inline info drawer for an alliance row (header line + one line per member). */
+		private int drawerHeight(Row r)
+		{
+			java.util.List<Map.Entry<String, Long>> members = rosterLookup == null ? null : rosterLookup.apply(r.clan);
+			int n = (members == null || members.isEmpty()) ? 1 : members.size();
+			return EXP_PAD * 2 + EXP_LINE * (n + 1);
 		}
 
 		@Override
@@ -2257,15 +2665,16 @@ class ClanTurfPanel extends PluginPanel
 						(float) Math.max(0.0, Math.min(1.0, r.alpha))));
 				int barY = (int) Math.round(r.y) + (ROW_H - BAR_H) / 2;
 				int arc = ARC;
+				int bw = w - ICON_GUTTER; // bars are shortened to leave a right gutter for the alliance symbol
 				long shownTiles = Math.round(r.tiles);
 
 				// Track.
 				g2.setColor(ColorScheme.DARKER_GRAY_COLOR);
-				g2.fillRoundRect(0, barY, w - 1, BAR_H, arc, arc);
+				g2.fillRoundRect(0, barY, bw - 1, BAR_H, arc, arc);
 
 				// Clan fill, scaled to the (animated) leader, with a subtle vertical sheen.
-				int fillW = (int) Math.round((r.tiles / denom) * (w - 1));
-				fillW = Math.max(MIN_FILL, Math.min(w - 1, fillW));
+				int fillW = (int) Math.round((r.tiles / denom) * (bw - 1));
+				fillW = Math.max(MIN_FILL, Math.min(bw - 1, fillW));
 				Color top = brighten(r.color, 40);
 				g2.setPaint(new GradientPaint(0, barY, top, 0, barY + BAR_H, r.color));
 				g2.fillRoundRect(0, barY, fillW, BAR_H, arc, arc);
@@ -2276,20 +2685,39 @@ class ClanTurfPanel extends PluginPanel
 				{
 					g2.setStroke(new BasicStroke(2f));
 					g2.setColor(Color.WHITE);
-					g2.drawRoundRect(1, barY + 1, w - 3, BAR_H - 2, arc, arc);
+					g2.drawRoundRect(1, barY + 1, bw - 3, BAR_H - 2, arc, arc);
 					g2.setStroke(new BasicStroke(1f));
 				}
 				else
 				{
 					g2.setColor(ColorScheme.MEDIUM_GRAY_COLOR);
-					g2.drawRoundRect(0, barY, w - 1, BAR_H, arc, arc);
+					g2.drawRoundRect(0, barY, bw - 1, BAR_H, arc, arc);
 				}
 
-				// Hover highlight: a soft brightening over the row under the cursor (click to recolor).
-				if (hoveredClan != null && r.clan.equalsIgnoreCase(hoveredClan))
+				// Bar hover highlight: a soft brightening over the bar under the cursor (click to recolor).
+				if (hoveredBarClan != null && r.clan.equalsIgnoreCase(hoveredBarClan))
 				{
 					g2.setColor(new Color(255, 255, 255, 45));
-					g2.fillRoundRect(0, barY, w - 1, BAR_H, arc, arc);
+					g2.fillRoundRect(0, barY, bw - 1, BAR_H, arc, arc);
+				}
+
+				// Alliance symbol in the right gutter - only alliances have one; solo clans leave it blank.
+				if (r.icon > 0)
+				{
+					// Icon hover highlight: only the symbol lights up (click to open its info drawer).
+					if (hoveredIconClan != null && r.clan.equalsIgnoreCase(hoveredIconClan))
+					{
+						g2.setColor(new Color(255, 255, 255, 55));
+						g2.fillRoundRect(bw, barY, ICON_GUTTER - 1, BAR_H, arc, arc);
+					}
+					java.awt.image.BufferedImage img = iconImage == null ? null : iconImage.apply(r.icon);
+					if (img != null)
+					{
+						int isz = BAR_H - 4;
+						int ix = bw + (ICON_GUTTER - isz) / 2;
+						int iy = barY + (BAR_H - isz) / 2;
+						g2.drawImage(img, ix, iy, isz, isz, null);
+					}
 				}
 
 				// Rank + name (left), tiles + GE% (right), over a soft shadow for legibility.
@@ -2303,7 +2731,40 @@ class ClanTurfPanel extends PluginPanel
 
 				g2.setFont(statFont);
 				int statW = g2.getFontMetrics().stringWidth(stat);
-				drawShadowed(g2, stat, w - statW - 8, textY, Color.WHITE);
+				drawShadowed(g2, stat, bw - statW - 8, textY, Color.WHITE);
+
+				// Inline alliance-info drawer, opened by clicking the row's symbol.
+				if (r.icon > 0 && r.clan.equalsIgnoreCase(expandedClan))
+				{
+					int dh = drawerHeight(r);
+					int dTop = (int) Math.round(r.y) + ROW_H;
+					int dw = w - ICON_GUTTER;
+					g2.setColor(new Color(0, 0, 0, 90));
+					g2.fillRoundRect(0, dTop, dw - 1, dh - 1, arc, arc);
+					g2.setColor(new Color(r.color.getRed(), r.color.getGreen(), r.color.getBlue(), 160));
+					g2.drawRoundRect(0, dTop, dw - 1, dh - 1, arc, arc);
+
+					g2.setFont(statFont);
+					int lineY = dTop + EXP_PAD + g2.getFontMetrics().getAscent();
+					drawShadowed(g2, "Allied clans:", 8, lineY, r.color);
+					List<Map.Entry<String, Long>> members = rosterLookup == null ? null : rosterLookup.apply(r.clan);
+					if (members == null || members.isEmpty())
+					{
+						lineY += EXP_LINE;
+						drawShadowed(g2, "(none)", 16, lineY, Color.LIGHT_GRAY);
+					}
+					else
+					{
+						for (Map.Entry<String, Long> m : members)
+						{
+							lineY += EXP_LINE;
+							drawShadowed(g2, "- " + m.getKey(), 16, lineY, Color.WHITE);
+							String cnt = String.valueOf(m.getValue());
+							int cw = g2.getFontMetrics().stringWidth(cnt);
+							drawShadowed(g2, cnt, dw - cw - 8, lineY, Color.WHITE);
+						}
+					}
+				}
 			}
 
 			g2.dispose();

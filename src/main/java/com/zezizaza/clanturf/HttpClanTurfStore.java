@@ -88,6 +88,7 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile Map<String, Set<String>> allyMembers = Collections.emptyMap();
 	private volatile Map<String, String> allyNameById = Collections.emptyMap(); // allianceId -> name
 	private volatile Map<String, String> allyOwnerById = Collections.emptyMap(); // allianceId -> owner clan
+	private volatile Map<String, Integer> allyIconById = Collections.emptyMap(); // allianceId -> symbol sprite id
 
 	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
 	private volatile long startedMs;
@@ -144,6 +145,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		allyMembers = Collections.emptyMap();
 		allyNameById = Collections.emptyMap();
 		allyOwnerById = Collections.emptyMap();
+		allyIconById = Collections.emptyMap();
 	}
 
 	@Override
@@ -203,6 +205,7 @@ class HttpClanTurfStore implements ClanTurfStore
 			allyMembers = Collections.emptyMap();
 			allyNameById = Collections.emptyMap();
 			allyOwnerById = Collections.emptyMap();
+			allyIconById = Collections.emptyMap();
 		}
 		else
 		{
@@ -403,6 +406,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		Map<String, String> nameById = new HashMap<>();
 		Map<String, String> colorById = new HashMap<>();
 		Map<String, String> ownerById = new HashMap<>();
+		Map<String, Integer> iconById = new HashMap<>();
 		for (String line : body.split("\n"))
 		{
 			if (line.isBlank())
@@ -416,6 +420,21 @@ class HttpClanTurfStore implements ClanTurfStore
 				{
 					colorById.put(f[1], f[2].trim());
 					nameById.put(f[1], f.length >= 4 ? f[3] : "");
+				}
+			}
+			else if (line.startsWith("AI,"))
+			{
+				String[] f = line.split(",", 3); // AI,id,icon
+				if (f.length >= 3)
+				{
+					try
+					{
+						iconById.put(f[1], Integer.parseInt(f[2].trim()));
+					}
+					catch (NumberFormatException ignored)
+					{
+						// skip a malformed icon line
+					}
 				}
 			}
 			else if (line.startsWith("M,"))
@@ -449,6 +468,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		allyMembers = members;
 		allyNameById = nameById;
 		allyOwnerById = ownerById;
+		allyIconById = iconById;
 	}
 
 	@Override
@@ -489,12 +509,71 @@ class HttpClanTurfStore implements ClanTurfStore
 		return aid == null ? null : allyOwnerById.get(aid);
 	}
 
+	@Override
+	public int allianceIconOf(String clan)
+	{
+		String aid = allianceIdOf(clan);
+		Integer icon = aid == null ? null : allyIconById.get(aid);
+		return icon == null ? 0 : icon; // 0 = unknown; callers fall back to the default symbol
+	}
+
+	@Override
+	public int allianceIconByDisplay(String display)
+	{
+		if (display == null)
+		{
+			return 0;
+		}
+		for (Map.Entry<String, Integer> e : allyIconById.entrySet())
+		{
+			String nm = allyNameById.get(e.getKey());
+			if (display.equalsIgnoreCase(nm) || display.equals(e.getKey()))
+			{
+				return e.getValue() == null ? 0 : e.getValue();
+			}
+		}
+		return 0;
+	}
+
+	@Override
+	public List<String> allianceMembersByDisplay(String display)
+	{
+		if (display != null)
+		{
+			for (Map.Entry<String, Set<String>> e : allyMembers.entrySet())
+			{
+				String nm = allyNameById.get(e.getKey());
+				if (display.equalsIgnoreCase(nm) || display.equals(e.getKey()))
+				{
+					List<String> out = new java.util.ArrayList<>(e.getValue());
+					java.util.Collections.sort(out);
+					return out;
+				}
+			}
+		}
+		return Collections.emptyList();
+	}
+
+	@Override
+	public Map<String, String> allianceNames()
+	{
+		// clan(lower) -> alliance display name, so the plugin can detect a rename (colors alone miss it).
+		Map<String, String> out = new HashMap<>();
+		for (Map.Entry<String, String> e : allyId.entrySet())
+		{
+			String nm = allyNameById.get(e.getValue());
+			out.put(e.getKey(), nm == null ? "" : nm);
+		}
+		return out;
+	}
+
 	// ---- alliance actions: blocking POSTs, so the plugin runs them off the game/EDT thread ----
 
-	String allianceCreate(String clan, String name, String color, String passcode)
+	String allianceCreate(String clan, String name, String color, String passcode, int icon)
 	{
 		return sendResult("POST", "/alliance/create",
-				form("clan", clan, "name", name, "color", color, "passcode", passcode));
+				form("clan", clan, "name", name, "color", color, "passcode", passcode,
+						"icon", String.valueOf(icon)));
 	}
 
 	String allianceJoin(String clan, String passcode)
@@ -570,6 +649,19 @@ class HttpClanTurfStore implements ClanTurfStore
 	{
 		return sendResult("POST", "/alliance/setpasscode",
 				form("id", id, "clan", clan, "old", oldPass, "new", newPass));
+	}
+
+	/** Owner clan only: rename the alliance. Server runs the name filter + a one-per-week cap. */
+	String allianceSetName(String id, String clan, String name)
+	{
+		return sendResult("POST", "/alliance/setname", form("id", id, "clan", clan, "name", name));
+	}
+
+	/** Owner clan only: set the alliance symbol (a clan-motif sprite id, 3024-3050). */
+	String allianceSetIcon(String id, String clan, int icon)
+	{
+		return sendResult("POST", "/alliance/seticon",
+				form("id", id, "clan", clan, "icon", String.valueOf(icon)));
 	}
 
 	/** Owner clan only: un-block a previously kicked clan so it can rejoin with the passcode. */

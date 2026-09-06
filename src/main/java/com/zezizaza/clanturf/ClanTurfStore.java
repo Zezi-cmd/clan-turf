@@ -130,6 +130,30 @@ interface ClanTurfStore
 		return null;
 	}
 
+	/** The alliance's chosen symbol (a clan-motif sprite id), or 0 if none/unknown. */
+	default int allianceIconOf(String clan)
+	{
+		return 0;
+	}
+
+	/** The symbol sprite id for an alliance addressed by its display name (or id), or 0 if not an alliance. */
+	default int allianceIconByDisplay(String display)
+	{
+		return 0;
+	}
+
+	/** The member clans of an alliance addressed by its display name (or id); empty if not an alliance. */
+	default List<String> allianceMembersByDisplay(String display)
+	{
+		return Collections.emptyList();
+	}
+
+	/** Every allied clan mapped to its alliance's display name, for detecting a rename (colors miss it). */
+	default Map<String, String> allianceNames()
+	{
+		return Collections.emptyMap();
+	}
+
 	/** Start any background work (e.g. the sync poller). No-op for the local store. */
 	default void start()
 	{
