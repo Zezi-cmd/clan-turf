@@ -157,13 +157,14 @@ class ClanTurfPanel extends PluginPanel
 	private Color createColor = new Color(0x8a, 0x2b, 0xe2); // default alliance color (purple)
 	private int createIcon = 3024; // symbol chosen in the create form (Skull default)
 	private final JButton createIconBtn = new JButton(); // create form: click to pick the alliance symbol
-	private boolean allianceCollapsed = false;
+	private boolean allianceCollapsed = true; // Alliance Tools starts collapsed on a fresh install
 	private boolean allianceInAlliance = false;
 	private boolean allianceOnline = true;
 	private boolean allianceCanManage = false;
 	private boolean allianceIsOwnerClan = false; // our clan created the alliance -> Disband, not Leave
 	private boolean battlesCollapsed = false;
-	private boolean globalCollapsed = false;
+	private boolean globalCollapsed = true; // Community Claims starts collapsed on a fresh install
+	private boolean signedIn = false; // logged in with live data; hides battles/alliance at the login screen
 	private boolean globalHasData = false;
 	private String battlesBase = "Active battles";
 	private final StyledButton clearOfflineBtn = new StyledButton("Clear all tiles", 30);
@@ -882,7 +883,23 @@ class ClanTurfPanel extends PluginPanel
 			board.setData(new ArrayList<>(), 0, null);
 			globalHasData = false;
 			applyGlobalVisibility();
+			setSignedIn(false); // login screen: hide battles + alliance until we're actually in
 		});
+	}
+
+	/**
+	 * Active battles and Alliance Tools only mean anything once you're logged in - at the login screen
+	 * they'd sit there empty and then jump around as data lands. So hide both while signed out and let
+	 * them appear with the first live update, the way Community Claims already gates itself on having a
+	 * total. The Online/Offline toggle and the Report footer stay visible the whole time.
+	 */
+	private void setSignedIn(boolean in)
+	{
+		signedIn = in;
+		battlesHeader.setVisible(in);
+		battlesBox.setVisible(in && !battlesCollapsed);
+		allianceHeader.setVisible(in);
+		allianceBody.setVisible(in && !allianceCollapsed);
 	}
 
 	/**
@@ -1140,6 +1157,10 @@ class ClanTurfPanel extends PluginPanel
 
 		SwingUtilities.invokeLater(() ->
 		{
+			if (!signedIn)
+			{
+				setSignedIn(true); // first live update after login: reveal battles + alliance
+			}
 			if (revealBarsPending)
 			{
 				// Coming online: hold the offline bars until the server's claims load (empty until the
@@ -1493,12 +1514,15 @@ class ClanTurfPanel extends PluginPanel
 		repaint();
 	}
 
-	/** Show the Community Claims header/body per whether there's data and whether it's collapsed. The
-	 *  header stays visible (with data) so you can expand it again; only the body collapses. */
+	/** Show the Community Claims section per whether there's data and whether it's collapsed. The counter
+	 *  itself always stays visible (with data); collapsing only hides the intro and thank-you lines above
+	 *  and below it, so the number slides up under the header and back down when reopened. */
 	private void applyGlobalVisibility()
 	{
 		globalHeader.setVisible(globalHasData);
-		globalBox.setVisible(globalHasData && !globalCollapsed);
+		globalBox.setVisible(globalHasData);
+		globalIntro.setVisible(globalHasData && !globalCollapsed);
+		globalSub.setVisible(globalHasData && !globalCollapsed);
 		globalHeader.setText("Community Claims" + (globalCollapsed ? "  ▸" : "  ▾"));
 	}
 

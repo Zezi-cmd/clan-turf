@@ -40,7 +40,7 @@ The GE is tinted on your minimap in the current owner's color. On the world map,
 
 ## Live scoreboard
 
-The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds.
+The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds. An alliance carries its symbol on the right of its bar - click the symbol to expand a breakdown of how many tiles each allied clan has put in, while the bar keeps showing the team's combined total.
 
 ![Scoreboard](images/scoreboard.png)
 
@@ -54,7 +54,9 @@ See which worlds are contested, with the leading clan and closest rival shown fo
 
 Team up with other clans. One clan creates an alliance and shares a passcode; any clan that joins is treated as one team - allied clans stop taking each other's tiles, and their turf shows in a single shared color and counts as one on the scoreboard, the leader, and the Active Battles board that everyone sees. Two clans mid-battle can trade a code and merge their tiles on the spot.
 
-Alliances live in a collapsible **Alliance** section in the side panel, managed by your clan's leadership (Owner, Deputy, or Admin). The clan that creates the alliance owns it and can recolor it, remove clans, change the passcode, or disband it; a clan that only joined gets a **Leave alliance** button instead. Prefer a different shade? Clicking your own clan's scoreboard bar to pick a local color still overrides the alliance color for your view.
+Alliances live in a collapsible **Alliance** section in the side panel, managed by your clan's leadership (Owner, Deputy, or Admin). The clan that creates the alliance owns it and can recolor it, give it a symbol, remove clans, change the passcode, or disband it; a clan that only joined gets a **Leave alliance** button instead. Prefer a different shade? Clicking your own clan's scoreboard bar to pick a local color still overrides the alliance color for your view.
+
+Pick one of the game's official clan symbols for your alliance and it shows everywhere the alliance does: large above the name on the world map, on its scoreboard bar, and beside its name in the panel. The passcode is just a code you make up to control who can join - it is never your RuneScape or Jagex account password, and Clan Turf will never ask for that.
 
 ## Rally your clan in chat
 
@@ -156,5 +158,5 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 
 - **Turf is per clan and per world.** You need to be in a clan to claim anything, and each world's Grand Exchange is its own separate battleground.
 - **For the best look, pair it with [Improved Tile Indicators](https://runelite.net/plugin-hub/show/improved-tile-indicators).** Enable **Draw overlays below player** and **Draw overlays below NPCs**, then add the GE NPCs to **NPCs to draw on top**. Pets can be set to **Draw below** via shift + right-click.
-- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, and passcode you enter. No account details or personal information are sent. Syncing pauses when you log out.
+- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, symbol, and passcode you enter. No account details or personal information are sent. Syncing pauses when you log out.
 - **No automation.** Clan Turf reads your position and draws overlays. Clan chat commands only read clan messages and display local formatted text. It never moves your character, sends chat, or performs automated game actions.
