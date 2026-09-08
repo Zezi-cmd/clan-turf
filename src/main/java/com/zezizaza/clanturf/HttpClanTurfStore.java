@@ -670,13 +670,19 @@ class HttpClanTurfStore implements ClanTurfStore
 		return sendResult("POST", "/alliance/unblacklist", form("id", id, "clan", clan, "target", target));
 	}
 
-	/** Kick an immediate alliance re-poll so a create/join shows up without waiting for the timer. */
+	/**
+	 * Kick an immediate alliance re-poll so a create/join/leave/disband shows up without waiting for the
+	 * timer. Also re-polls battles right after, because those same actions re-aggregate the Active-battles
+	 * board (a disbanded alliance's row has to flip to the plain clan at the same time the scoreboard does,
+	 * otherwise the battles list lags on its slower cycle and the old alliance row lingers for seconds).
+	 */
 	void refreshAlliancesSoon()
 	{
 		ScheduledExecutorService e = exec;
 		if (e != null)
 		{
 			e.execute(this::pollAlliances);
+			e.execute(this::pollBattles);
 		}
 	}
 

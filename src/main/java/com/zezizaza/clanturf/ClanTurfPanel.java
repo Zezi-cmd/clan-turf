@@ -127,6 +127,10 @@ class ClanTurfPanel extends PluginPanel
 	private final JLabel allianceMembersLabel = new JLabel();
 	private final JPanel allianceSwatch = new JPanel();     // create-color preview + click to pick
 	private final JPanel allianceOwnSwatch = new JPanel();  // holds the current alliance color (picker seed)
+	private static final int ALLIANCE_MAX_WORDS = 2;     // name shape: up to 2 words...
+	private static final int ALLIANCE_MAX_WORD_LEN = 10; // ...each up to 10 characters, so it fits everywhere
+	private static final int BATTLE_NAME_CLIP = 12;      // clip names in a single-line Active-battles row
+	private static final int BATTLE_VS_CLIP = 10;        // tighter clip for the two-column current-world matchup
 	private final JTextField nameField = new JTextField();
 	private final JLabel allianceNameLabel = new JLabel();
 	private final JTextField createPass = new JTextField();
@@ -1369,16 +1373,16 @@ class ClanTurfPanel extends PluginPanel
 			worldLabel.setForeground(Color.WHITE);
 			row.add(worldLabel, BorderLayout.WEST);
 
-			String ownerName = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
-					+ "</span>";
+			String ownerName = "<span style='color:#" + ownerHex + "'>"
+					+ escape(clip(b.getOwner(), BATTLE_VS_CLIP)) + "</span>";
 			String matchup;
 			if (b.getRunnerUp() != null)
 			{
 				// Each clan and its tile count are centered in one column, so the clan name sits
 				// directly above its tiles, with the "vs" between the two columns.
 				String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
-				String upName = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
-						+ "</span>";
+				String upName = "<span style='color:#" + upHex + "'>"
+						+ escape(clip(b.getRunnerUp(), BATTLE_VS_CLIP)) + "</span>";
 				matchup = "<html><table cellpadding=0 cellspacing=0>"
 						+ "<tr><td align='center'>" + ownerName + "</td><td>&nbsp;vs&nbsp;</td>"
 						+ "<td align='center'>" + upName + "</td></tr>"
@@ -1401,13 +1405,13 @@ class ClanTurfPanel extends PluginPanel
 
 		// Other worlds: a single compact info label (the world's in the label, hop to it yourself).
 		String worldTag = "<b>W" + b.getWorld() + "</b>";
-		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(b.getOwner())
+		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(clip(b.getOwner(), BATTLE_NAME_CLIP))
 				+ "</span>&nbsp;" + b.getOwnerTiles();
 		String html;
 		if (b.getRunnerUp() != null)
 		{
 			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
-			String upCell = "<span style='color:#" + upHex + "'>" + escape(b.getRunnerUp())
+			String upCell = "<span style='color:#" + upHex + "'>" + escape(clip(b.getRunnerUp(), BATTLE_NAME_CLIP))
 					+ "</span>&nbsp;" + b.getRunnerUpTiles();
 			html = "<html><table cellpadding=0 cellspacing=0>"
 					+ "<tr><td>" + worldTag + "&nbsp;</td><td>" + ownerCell
@@ -1433,6 +1437,17 @@ class ClanTurfPanel extends PluginPanel
 	private static String tileWord(int n)
 	{
 		return n == 1 ? " tile" : " tiles";
+	}
+
+	/** Shorten a clan/alliance name with a trailing ellipsis so an Active-battles row can't overflow the
+	 *  panel and clip. The scoreboard drawer and world map still show the full name. */
+	private static String clip(String s, int max)
+	{
+		if (s == null)
+		{
+			return "";
+		}
+		return s.length() <= max ? s : s.substring(0, Math.max(1, max - 1)).trim() + "…";
 	}
 
 	/** One clan's standing: name, color, tiles held. */
@@ -1579,7 +1594,8 @@ class ClanTurfPanel extends PluginPanel
 		styleField(nameField);
 		styleField(createPass);
 		styleField(joinPass);
-		nameField.setToolTipText("Alliance name");
+		limitAllianceName(nameField);
+		nameField.setToolTipText("Up to 2 words, 10 letters each");
 		createPass.setToolTipText("Leave blank and a random passcode is generated for you");
 		joinPass.setToolTipText("Alliance passcode");
 		createBtn.onClick(() ->
@@ -1616,7 +1632,7 @@ class ClanTurfPanel extends PluginPanel
 
 		allianceJoinCreate.add(smallLabel("Create an alliance:"));
 		allianceJoinCreate.add(Box.createVerticalStrut(4));
-		allianceJoinCreate.add(smallLabel("Name"));
+		allianceJoinCreate.add(smallLabel("Name (up to 2 words, 10 letters each)"));
 		allianceJoinCreate.add(Box.createVerticalStrut(2));
 		allianceJoinCreate.add(nameField);
 		allianceJoinCreate.add(Box.createVerticalStrut(8));
@@ -1981,8 +1997,9 @@ class ClanTurfPanel extends PluginPanel
 			return;
 		}
 		JTextField field = new JTextField();
+		limitAllianceName(field);
 		JPanel form = new JPanel(new java.awt.GridLayout(0, 1, 0, 4));
-		form.add(new JLabel("New alliance name"));
+		form.add(new JLabel("New alliance name (up to 2 words, 10 letters each)"));
 		form.add(field);
 		int r = JOptionPane.showConfirmDialog(this, form, "Change name",
 				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
@@ -2283,6 +2300,63 @@ class ClanTurfPanel extends PluginPanel
 	{
 		f.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 		f.setAlignmentX(Component.LEFT_ALIGNMENT);
+	}
+
+	/** Constrain an alliance-name field to the shape the map and bar can show: at most 2 words, each at most
+	 *  10 characters, single spaces only (no leading or double spaces). The edit is accepted only if the
+	 *  resulting text still fits that shape, so a user simply can't type a 4th word or an 11th letter. The
+	 *  server enforces the same rule; this just makes it obvious while typing. */
+	private static void limitAllianceName(JTextField f)
+	{
+		((javax.swing.text.AbstractDocument) f.getDocument()).setDocumentFilter(
+				new javax.swing.text.DocumentFilter()
+				{
+					@Override
+					public void insertString(FilterBypass fb, int off, String s,
+							javax.swing.text.AttributeSet attr) throws javax.swing.text.BadLocationException
+					{
+						replace(fb, off, 0, s, attr);
+					}
+
+					@Override
+					public void replace(FilterBypass fb, int off, int len, String s,
+							javax.swing.text.AttributeSet attr) throws javax.swing.text.BadLocationException
+					{
+						String cur = fb.getDocument().getText(0, fb.getDocument().getLength());
+						String next = cur.substring(0, off) + (s == null ? "" : s) + cur.substring(off + len);
+						if (allianceNameTypingOk(next))
+						{
+							super.replace(fb, off, len, s, attr);
+						}
+					}
+				});
+	}
+
+	/** True while a name is still a valid work-in-progress: up to 3 space-separated slots, each up to 10
+	 *  chars, no leading space and no double spaces. A single trailing space is allowed (starting a word). */
+	private static boolean allianceNameTypingOk(String s)
+	{
+		if (s.isEmpty())
+		{
+			return true;
+		}
+		if (s.startsWith(" ") || s.contains("  "))
+		{
+			return false;
+		}
+		String[] parts = s.split(" ", -1); // keep a trailing empty slot so "wrath " reads as 2 slots
+		if (parts.length > ALLIANCE_MAX_WORDS)
+		{
+			return false;
+		}
+		for (String p : parts)
+		{
+			if (p.length() > ALLIANCE_MAX_WORD_LEN)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/** A left-aligned horizontal row of a fixed-size swatch/control and a stretchy control beside it. */
@@ -2653,12 +2727,12 @@ class ClanTurfPanel extends PluginPanel
 			}
 		}
 
-		/** Pixel height of the inline info drawer for an alliance row (header line + one line per member). */
+		/** Pixel height of the inline drawer: the alliance name, an "Allied clans:" header, one line per member. */
 		private int drawerHeight(Row r)
 		{
 			java.util.List<Map.Entry<String, Long>> members = rosterLookup == null ? null : rosterLookup.apply(r.clan);
 			int n = (members == null || members.isEmpty()) ? 1 : members.size();
-			return EXP_PAD * 2 + EXP_LINE * (n + 1);
+			return EXP_PAD * 2 + EXP_LINE * (n + 2);
 		}
 
 		@Override
@@ -2749,12 +2823,19 @@ class ClanTurfPanel extends PluginPanel
 				double gePct = totalTiles > 0 ? shownTiles * 100.0 / totalTiles : 0.0;
 				String stat = shownTiles + "  (" + String.format("%.1f", gePct) + "%)";
 
-				g2.setFont(nameFont);
+				// Measure the stat first so the name can be clipped to whatever space is left, then ellipsized
+				// if it still doesn't fit - a long alliance name shortens to "..." on the bar rather than
+				// running under the count (the world map shows it in full, stacked per word).
+				g2.setFont(statFont);
+				int statW = g2.getFontMetrics().stringWidth(stat);
 				int textY = barY + (BAR_H + g2.getFontMetrics().getAscent()) / 2 - 2;
+
+				g2.setFont(nameFont);
+				int nameMaxW = bw - statW - 8 - 8 - 6; // bar minus stat, both 8px insets, plus a 6px gap
+				name = ellipsize(g2.getFontMetrics(), name, nameMaxW);
 				drawShadowed(g2, name, 8, textY, Color.WHITE);
 
 				g2.setFont(statFont);
-				int statW = g2.getFontMetrics().stringWidth(stat);
 				drawShadowed(g2, stat, bw - statW - 8, textY, Color.WHITE);
 
 				// Inline alliance-info drawer, opened by clicking the row's symbol.
@@ -2770,7 +2851,11 @@ class ClanTurfPanel extends PluginPanel
 
 					g2.setFont(statFont);
 					int lineY = dTop + EXP_PAD + g2.getFontMetrics().getAscent();
-					drawShadowed(g2, "Allied clans:", 8, lineY, r.color);
+					// The bar clips a long name; the drawer shows it in full on its own first line.
+					String fullName = ellipsize(g2.getFontMetrics(), r.clan, dw - 16);
+					drawShadowed(g2, fullName, 8, lineY, r.color);
+					lineY += EXP_LINE;
+					drawShadowed(g2, "Allied clans:", 8, lineY, ColorScheme.LIGHT_GRAY_COLOR);
 					List<Map.Entry<String, Long>> members = rosterLookup == null ? null : rosterLookup.apply(r.clan);
 					if (members == null || members.isEmpty())
 					{
@@ -2792,6 +2877,30 @@ class ClanTurfPanel extends PluginPanel
 			}
 
 			g2.dispose();
+		}
+
+		/** Trim a string with a trailing "..." so it fits maxW pixels; returns it unchanged if it already fits. */
+		private static String ellipsize(FontMetrics fm, String s, int maxW)
+		{
+			if (maxW <= 0 || fm.stringWidth(s) <= maxW)
+			{
+				return s;
+			}
+			String ell = "...";
+			int ew = fm.stringWidth(ell);
+			int w = 0;
+			StringBuilder sb = new StringBuilder();
+			for (int i = 0; i < s.length(); i++)
+			{
+				int cw = fm.charWidth(s.charAt(i));
+				if (w + cw + ew > maxW)
+				{
+					break;
+				}
+				sb.append(s.charAt(i));
+				w += cw;
+			}
+			return sb.toString().replaceAll("\\s+$", "") + ell;
 		}
 
 		private static void drawShadowed(Graphics2D g2, String s, int x, int y, Color c)

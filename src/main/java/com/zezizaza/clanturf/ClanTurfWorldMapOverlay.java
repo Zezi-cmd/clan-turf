@@ -184,7 +184,9 @@ class ClanTurfWorldMapOverlay extends Overlay
 				// than its bounding-box center.
 				String[] words = owner.trim().split("\\s+");
 				int westShift = Math.round(geWidthPx / 20f);
-				int lineH = fm.getHeight();
+				// Tighten the leading between stacked words - the font's full height leaves too big a gap for
+				// a pixel font, so drop it to about the cap height plus descent.
+				int lineH = Math.round(fm.getHeight() * 0.78f);
 				int nameH = words.length * lineH;
 
 				// The alliance symbol (if any) sits large and centered ABOVE the name; the icon+name pair is
