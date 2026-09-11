@@ -34,9 +34,11 @@ import java.awt.geom.Path2D;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
@@ -120,6 +122,8 @@ class ClanTurfOverlay extends Overlay
 	private final Map<Long, String> lastOwners = new HashMap<>();
 	/** Tiles currently fading out (reset/clear dissolve): tile key -&gt; {clan, start time}. */
 	private final Map<Long, Dissolve> dissolving = new HashMap<>();
+	/** Fade-in state for claim-triggered pre-claims (filler + gap slivers) while Show Pre-Claims is off. */
+	private final Map<Long, Appear> preAppear = new HashMap<>();
 	private long seenDissolveFlash;
 	private int lastWorld = -1; // wipe per-tile memory on a world hop so nothing bleeds across worlds
 
@@ -184,6 +188,7 @@ class ClanTurfOverlay extends Overlay
 			appearing.clear();
 			dissolving.clear();
 			lastOwners.clear();
+			preAppear.clear();
 		}
 
 		Collection<ClanTurfPoint> claims = plugin.getDisplayClaims();
@@ -231,22 +236,51 @@ class ClanTurfOverlay extends Overlay
 			owner.put(key(w.getX(), w.getY()), p.getClanName());
 		}
 
-		// Filler pockets are always shown near the GE in the current GE owner's color (white when
-		// unclaimed), fading old -> new on takeover like the boundary. The border map is the claims plus
-		// the filler - all tagged with the GE owner (or an unclaimed sentinel) - so the owner's own tiles
-		// merge with the filler while a rival's tiles seam against it with a double line, and that flips
-		// automatically when the GE changes hands. Render-only: filler is never claimed, counted, or synced.
+		// Two wall tiles can't be walked, so they can never be claimed the normal way. When the nearby
+		// trigger tile is claimed, mirror its clan onto them here, in the render-local owner map only, so
+		// they merge and border exactly like real claimed tiles instead of notching the boundary inward.
+		// This map never reaches the server or the scoreboard count, so these tiles stay uncounted.
+		mirrorClaim(owner, 3188, 3480, 3189, 3479);
+		mirrorClaim(owner, 3187, 3477, 3188, 3478);
+
+		// Pre-claims (the unwalkable filler pockets + the diagonal-wall gap slivers). Show Pre-Claims ON:
+		// the solid-GE look - everything shown in the GE owner's color (white when unclaimed), tagged in the
+		// border map so the owner's tiles merge and rivals double-line. OFF: the decluttered look - a
+		// pre-claim only shows where a real claim borders it, in that claim's color, fading in.
 		String leader = plugin.getBoundaryLeader();
 		String fillerId = leader != null ? leader : FILLER_UNCLAIMED;
 		Map<Long, String> border = new HashMap<>(owner);
-		if (config.showPreClaims() && GrandExchangeArea.near(playerLocation, BOUNDARY_MARGIN))
+		long nowPre = System.currentTimeMillis();
+		Set<Long> activePre = new HashSet<>();
+		if (GrandExchangeArea.near(playerLocation, BOUNDARY_MARGIN))
 		{
-			for (WorldPoint f : GrandExchangeArea.filler())
+			if (config.showPreClaims())
 			{
-				border.putIfAbsent(key(f.getX(), f.getY()), fillerId);
+				for (WorldPoint f : GrandExchangeArea.filler())
+				{
+					border.putIfAbsent(key(f.getX(), f.getY()), fillerId);
+				}
+				drawFiller(graphics, wv, plane, playerLocation, border, fillerId, alpha, outline);
 			}
-			drawFiller(graphics, wv, plane, playerLocation, border, fillerId, alpha, outline);
+			else
+			{
+				for (WorldPoint f : GrandExchangeArea.filler())
+				{
+					String c = claimedNeighbour(owner, f.getX(), f.getY());
+					if (c != null)
+					{
+						border.put(key(f.getX(), f.getY()), c);
+					}
+				}
+				drawActiveFiller(graphics, wv, plane, playerLocation, border, owner, alpha, outline,
+						nowPre, activePre);
+			}
+			// The diagonal-wall gap slivers are always claim-triggered, regardless of the toggle, and only
+			// fill when BOTH the tiles they border are claimed.
+			drawGapTriangles(graphics, wv, plane, playerLocation, owner, alpha, nowPre, activePre);
 		}
+		// Forget fade state for pre-claims that aren't active this frame, so they fade in again next time.
+		preAppear.keySet().retainAll(activePre);
 
 		if (claims.isEmpty())
 		{
@@ -497,6 +531,266 @@ class ClanTurfOverlay extends Overlay
 				}
 			}
 		}
+	}
+
+	/**
+	 * Show Pre-Claims OFF (decluttered): draw a filler pocket only where a real claim borders it, in that
+	 * claim's color, fading in, with the same merged outline a claimed tile gets - so pockets fill in as
+	 * tiles are taken rather than being shown all the time.
+	 */
+	private void drawActiveFiller(Graphics2D graphics, WorldView wv, int plane, WorldPoint playerLocation,
+			Map<Long, String> border, Map<Long, String> owner, int alpha, boolean outline, long now,
+			Set<Long> activePre)
+	{
+		// The four unreachable center tiles fill only once every tile in their ring is filled. Add them to
+		// the border map first so the surrounding tiles' outlines merge with them instead of drawing a line.
+		String centerClan = centerRingClan(owner);
+		if (centerClan != null)
+		{
+			for (int[] c : GrandExchangeArea.centerTiles())
+			{
+				border.put(key(c[0], c[1]), centerClan);
+			}
+		}
+		for (WorldPoint tile : GrandExchangeArea.filler())
+		{
+			// filledNeighbour, not claimedNeighbour: a mirrored wall tile is its own claim in the owner
+			// map, so it fills in its own color even when none of its orthogonal neighbours are claimed.
+			String clan = filledNeighbour(owner, tile.getX(), tile.getY());
+			if (clan != null)
+			{
+				drawPreClaimTile(graphics, wv, plane, playerLocation, tile.getX(), tile.getY(), clan,
+						border, alpha, outline, now, activePre);
+			}
+		}
+		if (centerClan != null)
+		{
+			for (int[] c : GrandExchangeArea.centerTiles())
+			{
+				drawPreClaimTile(graphics, wv, plane, playerLocation, c[0], c[1], centerClan,
+						border, alpha, outline, now, activePre);
+			}
+		}
+	}
+
+	/** Fills one pre-claim tile in a clan's color with fade-in, plus its merged outline against the border. */
+	private void drawPreClaimTile(Graphics2D graphics, WorldView wv, int plane, WorldPoint playerLocation,
+			int sx, int sy, String clan, Map<Long, String> border, int alpha, boolean outline, long now,
+			Set<Long> activePre)
+	{
+		double fade = preFade(key(sx, sy), clan, now, activePre);
+		Color base = ClanTurfColors.forClan(clan);
+		for (WorldPoint wp : WorldPoint.toLocalInstance(wv, new WorldPoint(sx, sy, plane)))
+		{
+			if (wp.getPlane() != plane
+					|| (playerLocation != null && wp.distanceTo(playerLocation) >= MAX_DRAW_DISTANCE))
+			{
+				continue;
+			}
+			LocalPoint lp = LocalPoint.fromWorld(wv, wp);
+			if (lp == null)
+			{
+				continue;
+			}
+			Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+			if (poly == null || poly.npoints < 4)
+			{
+				continue;
+			}
+			double dist = playerLocation == null ? 0 : wp.distanceTo(playerLocation);
+			double f = fadeFactor(dist) * fade;
+			if (alpha > 0)
+			{
+				graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(),
+						(int) Math.round(alpha * f)));
+				graphics.fill(poly);
+			}
+			if (outline)
+			{
+				int[] xp = poly.xpoints;
+				int[] yp = poly.ypoints;
+				double ccx = (xp[0] + xp[1] + xp[2] + xp[3]) / 4.0;
+				double ccy = (yp[0] + yp[1] + yp[2] + yp[3]) / 4.0;
+				Color edge = brighten(base, 60, (int) Math.round(config.outlineOpacity() * f));
+				drawTileOutline(graphics, edge,
+						edgeType(border.get(key(sx, sy - 1)), clan, GrandExchangeArea.contains(sx, sy - 1)),
+						edgeType(border.get(key(sx + 1, sy)), clan, GrandExchangeArea.contains(sx + 1, sy)),
+						edgeType(border.get(key(sx, sy + 1)), clan, GrandExchangeArea.contains(sx, sy + 1)),
+						edgeType(border.get(key(sx - 1, sy)), clan, GrandExchangeArea.contains(sx - 1, sy)),
+						xp, yp, ccx, ccy);
+			}
+		}
+	}
+
+	/** The clan filling the center's ring if every ring tile is claimed or an active filler, else null. */
+	private String centerRingClan(Map<Long, String> owner)
+	{
+		String clan = null;
+		for (int[] r : GrandExchangeArea.centerRing())
+		{
+			String c = owner.get(key(r[0], r[1]));
+			if (c == null)
+			{
+				c = claimedNeighbour(owner, r[0], r[1]);
+			}
+			if (c == null)
+			{
+				return null; // a ring tile isn't filled yet, so the center stays empty
+			}
+			if (clan == null)
+			{
+				clan = c;
+			}
+		}
+		return clan;
+	}
+
+	/**
+	 * The diagonal-wall gap triangles: filled (with their wall edge outlined) only when BOTH tiles the
+	 * triangle borders are claimed, in that claim's color, fading in. Always on, regardless of the toggle.
+	 * The two interior edges meet the claims (no line); the hypotenuse along the wall carries the outline.
+	 */
+	private void drawGapTriangles(Graphics2D graphics, WorldView wv, int plane, WorldPoint playerLocation,
+			Map<Long, String> owner, int alpha, long now, Set<Long> activePre)
+	{
+		if (alpha <= 0)
+		{
+			return;
+		}
+		for (GrandExchangeArea.GapFill gap : GrandExchangeArea.gapFills())
+		{
+			// A bordering tile counts if it's a real claim OR a filled (claim-adjacent) pre-claim pocket -
+			// so a triangle whose second edge is a booth still fills once that booth is filled.
+			String a = filledNeighbour(owner, gap.neighbourA[0], gap.neighbourA[1]);
+			String b = filledNeighbour(owner, gap.neighbourB[0], gap.neighbourB[1]);
+			if (a == null || b == null)
+			{
+				continue; // both bordering tiles must be filled for it to show at all
+			}
+			long k = key(gap.tile[0], gap.tile[1]);
+			String clan;
+			double fade;
+			if (a.equals(b))
+			{
+				// A single clan owns both edges: (re)commit to that color, resetting the fade on a change.
+				clan = a;
+				fade = preFade(k, clan, now, activePre);
+			}
+			else
+			{
+				// Edges owned by different clans: keep whatever color already committed (a rival taking one
+				// edge must not flip it), and only stay visible if a color was ever established.
+				Appear committed = preAppear.get(k);
+				if (committed == null)
+				{
+					continue;
+				}
+				clan = committed.clan;
+				activePre.add(k);
+				fade = appearFactor(committed, now);
+			}
+			Polygon poly = projectShape(wv, plane, playerLocation, gap.triangle);
+			if (poly == null)
+			{
+				continue;
+			}
+			double dist = playerLocation == null ? 0
+					: new WorldPoint(gap.tile[0], gap.tile[1], plane).distanceTo(playerLocation);
+			double f = fadeFactor(dist) * fade;
+			Color base = ClanTurfColors.forClan(clan);
+			graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(),
+					(int) Math.round(alpha * f)));
+			graphics.fill(poly);
+		}
+	}
+
+	/** Mirrors the trigger tile's clan onto an unwalkable wall tile in the render-local owner map. */
+	private void mirrorClaim(Map<Long, String> owner, int tx, int ty, int fx, int fy)
+	{
+		String clan = owner.get(key(tx, ty));
+		if (clan != null)
+		{
+			owner.put(key(fx, fy), clan);
+		}
+	}
+
+	/** The clan filling tile (x, y): its own claim, or the claim that fills it as a pre-claim pocket. */
+	private static String filledNeighbour(Map<Long, String> owner, int x, int y)
+	{
+		String c = owner.get(key(x, y));
+		return c != null ? c : claimedNeighbour(owner, x, y);
+	}
+
+	/** The clan claiming an orthogonal neighbour of (x, y), or null if none is claimed. */
+	private static String claimedNeighbour(Map<Long, String> owner, int x, int y)
+	{
+		String c = owner.get(key(x + 1, y));
+		if (c == null)
+		{
+			c = owner.get(key(x - 1, y));
+		}
+		if (c == null)
+		{
+			c = owner.get(key(x, y + 1));
+		}
+		if (c == null)
+		{
+			c = owner.get(key(x, y - 1));
+		}
+		return c;
+	}
+
+	/**
+	 * Fade-in factor (0..1) for a claim-triggered pre-claim, keyed by its tile. Resets when it first
+	 * activates or its clan changes, then ramps over {@link #FADE_IN_MS}. Records the key as active so the
+	 * caller can prune fade state for pre-claims that dropped out.
+	 */
+	private double preFade(long k, String clan, long now, Set<Long> activePre)
+	{
+		activePre.add(k);
+		Appear a = preAppear.get(k);
+		if (a == null || !a.clan.equals(clan))
+		{
+			a = new Appear(clan, now, false);
+			preAppear.put(k, a);
+		}
+		return appearFactor(a, now);
+	}
+
+	/**
+	 * Projects a small polygon of fractional world coords to a canvas polygon, or null if any vertex is
+	 * off-screen or past the draw distance. Each vertex projects directly (no global clip), so it is
+	 * correct at any camera angle. A world point (wx, wy) maps to the local point that many tiles from its
+	 * containing tile's center.
+	 */
+	private Polygon projectShape(WorldView wv, int plane, WorldPoint playerLocation, double[][] corners)
+	{
+		int size = Perspective.LOCAL_TILE_SIZE;
+		Polygon poly = new Polygon();
+		for (double[] c : corners)
+		{
+			int tx = (int) Math.floor(c[0]);
+			int ty = (int) Math.floor(c[1]);
+			if (playerLocation != null
+					&& new WorldPoint(tx, ty, plane).distanceTo(playerLocation) >= MAX_DRAW_DISTANCE)
+			{
+				return null;
+			}
+			LocalPoint center = LocalPoint.fromWorld(wv, new WorldPoint(tx, ty, plane));
+			if (center == null)
+			{
+				return null;
+			}
+			int lx = center.getX() + (int) Math.round((c[0] - (tx + 0.5)) * size);
+			int ly = center.getY() + (int) Math.round((c[1] - (ty + 0.5)) * size);
+			Point pt = Perspective.localToCanvas(client, new LocalPoint(lx, ly, wv), plane);
+			if (pt == null)
+			{
+				return null;
+			}
+			poly.addPoint(pt.getX(), pt.getY());
+		}
+		return poly.npoints >= 3 ? poly : null;
 	}
 
 	/**

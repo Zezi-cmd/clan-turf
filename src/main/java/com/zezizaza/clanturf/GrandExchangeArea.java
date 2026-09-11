@@ -127,6 +127,56 @@ final class GrandExchangeArea
 			{3192, 3510}, {3193, 3504}, {3193, 3505}, {3195, 3503}, {3197, 3507},
 	};
 
+	/**
+	 * Hand-collected tiles that sit just outside a diagonal wall and poke one corner into the GE, leaving a
+	 * triangular gap the axis-aligned fill can't cover. Each row is {@code {x, y, corner}} where corner is
+	 * the tile corner that points INTO the GE: {@link #GAP_NE}/{@link #GAP_SE}/{@link #GAP_SW}/{@link
+	 * #GAP_NW}. The overlay fills only that corner's triangle, so it reaches the wall and never bleeds out.
+	 */
+	private static final int GAP_NE = 0;
+	private static final int GAP_SE = 1;
+	private static final int GAP_SW = 2;
+	private static final int GAP_NW = 3;
+	private static final int[][] GAP_TILES = {
+			// diagonal running NW from the south-west corner (poke corner: NE)
+			{3143, 3468, GAP_NE}, {3142, 3469, GAP_NE}, {3141, 3470, GAP_NE}, {3140, 3471, GAP_NE},
+			{3139, 3472, GAP_NE},
+			// (poke corner: SE)
+			{3139, 3482, GAP_SE}, {3140, 3483, GAP_SE}, {3141, 3484, GAP_SE},
+			// (poke corner: NE) - third tile read 3139,4394 in-game, taken as 3139,3494 (typo)
+			{3141, 3492, GAP_NE}, {3140, 3493, GAP_NE}, {3139, 3494, GAP_NE},
+			// (poke corner: SE)
+			{3139, 3513, GAP_SE}, {3140, 3514, GAP_SE}, {3141, 3515, GAP_SE}, {3142, 3516, GAP_SE},
+			// (poke corner: SW)
+			{3158, 3516, GAP_SW}, {3159, 3515, GAP_SW}, {3160, 3514, GAP_SW},
+			// (poke corner: SE)
+			{3168, 3514, GAP_SE}, {3169, 3515, GAP_SE}, {3170, 3516, GAP_SE},
+			// long north-east diagonal (poke corner: SW)
+			{3189, 3516, GAP_SW}, {3190, 3515, GAP_SW}, {3191, 3514, GAP_SW}, {3192, 3513, GAP_SW},
+			{3193, 3512, GAP_SW}, {3194, 3511, GAP_SW}, {3195, 3510, GAP_SW}, {3196, 3509, GAP_SW},
+			{3197, 3508, GAP_SW},
+			// (poke corner: NW)
+			{3197, 3505, GAP_NW}, {3196, 3504, GAP_NW},
+			// (poke corner: NW)
+			{3195, 3502, GAP_NW}, {3194, 3501, GAP_NW}, {3193, 3500, GAP_NW}, {3192, 3499, GAP_NW},
+			{3191, 3498, GAP_NW}, {3190, 3497, GAP_NW},
+			// (poke corner: NW)
+			{3189, 3478, GAP_NW}, {3188, 3477, GAP_NW}, {3187, 3476, GAP_NW},
+	};
+
+	/** The four unreachable center tiles: no claim can ever border them, so under the claim-triggered mode
+	 *  they are filled only once every tile in {@link #CENTER_RING} around them is filled. */
+	private static final int[][] CENTER_TILES = {
+			{3164, 3490}, {3165, 3490}, {3164, 3489}, {3165, 3489},
+	};
+	/** The ring of pre-claim tiles around {@link #CENTER_TILES}; when all are filled, the center fills. */
+	private static final int[][] CENTER_RING = {
+			{3163, 3491}, {3164, 3491}, {3165, 3491}, {3166, 3491},
+			{3166, 3490}, {3166, 3489}, {3166, 3488},
+			{3165, 3488}, {3164, 3488}, {3163, 3488},
+			{3163, 3489}, {3163, 3490},
+	};
+
 	/** Ground floor only. */
 	private static final int PLANE = 0;
 
@@ -138,6 +188,8 @@ final class GrandExchangeArea
 	private static final Set<Integer> REGION_IDS;
 	private static final WorldPoint[] BOUNDARY;
 	private static final List<WorldPoint> FILLER_LIST;
+	/** Each gap tile's poke-in triangle plus the two interior tiles whose claim should reveal it. */
+	private static final List<GapFill> GAP_FILLS;
 	private static final int MIN_X;
 	private static final int MIN_Y;
 	private static final int MAX_X;
@@ -183,6 +235,70 @@ final class GrandExchangeArea
 		}
 		FILLER_LIST = fillerList;
 		WALKABLE_COUNT = count - fillerList.size();
+
+		// Precompute each gap tile's poke-in triangle: the poke corner (inside the wall) plus its two
+		// edge-neighbour corners, which sit on the tile-corner boundary line. Those two are then pushed half
+		// a tile OUTWARD (poke -> hypotenuse direction, i.e. the wall's outward normal for these 45-degree
+		// walls) so the fill reaches the drawn wall line instead of stopping half a tile short of it.
+		// Corners of tile (x, y): SW=(x,y), SE=(x+1,y), NW=(x,y+1), NE=(x+1,y+1).
+		List<GapFill> gapFills = new ArrayList<>(GAP_TILES.length);
+		for (int[] g : GAP_TILES)
+		{
+			int x = g[0], y = g[1];
+			int[] poke;
+			int[] h1;
+			int[] h2;
+			int[] na;
+			int[] nb;
+			switch (g[2])
+			{
+				case GAP_NE:
+					poke = new int[]{x + 1, y + 1};
+					h1 = new int[]{x + 1, y};
+					h2 = new int[]{x, y + 1};
+					na = new int[]{x + 1, y};
+					nb = new int[]{x, y + 1};
+					break;
+				case GAP_SE:
+					poke = new int[]{x + 1, y};
+					h1 = new int[]{x, y};
+					h2 = new int[]{x + 1, y + 1};
+					na = new int[]{x + 1, y};
+					nb = new int[]{x, y - 1};
+					break;
+				case GAP_SW:
+					poke = new int[]{x, y};
+					h1 = new int[]{x + 1, y};
+					h2 = new int[]{x, y + 1};
+					na = new int[]{x - 1, y};
+					nb = new int[]{x, y - 1};
+					break;
+				default: // GAP_NW
+					poke = new int[]{x, y + 1};
+					h1 = new int[]{x, y};
+					h2 = new int[]{x + 1, y + 1};
+					na = new int[]{x - 1, y};
+					nb = new int[]{x, y + 1};
+					break;
+			}
+			double mx = (h1[0] + h2[0]) / 2.0;
+			double my = (h1[1] + h2[1]) / 2.0;
+			double dx = mx - poke[0];
+			double dy = my - poke[1];
+			double len = Math.hypot(dx, dy);
+			double ux = len > 1e-9 ? dx / len : 0;
+			double uy = len > 1e-9 ? dy / len : 0;
+			// No outward push: extending the corners onto the raised ground at the wall base made the
+			// overlay project them up the wall face. Keep them on the flat tile-corner line (push 0).
+			double push = 0.0;
+			double[][] tri = {
+					{poke[0], poke[1]},
+					{h1[0] + ux * push, h1[1] + uy * push},
+					{h2[0] + ux * push, h2[1] + uy * push},
+			};
+			gapFills.add(new GapFill(new int[]{x, y}, tri, na, nb));
+		}
+		GAP_FILLS = gapFills;
 
 		// Every map region the area's bounding box touches, so the store reads/writes all of
 		// them (the fortress can straddle a region boundary). regionId = (x>>6)<<8 | (y>>6).
@@ -289,6 +405,45 @@ final class GrandExchangeArea
 	static List<WorldPoint> filler()
 	{
 		return FILLER_LIST;
+	}
+
+	/**
+	 * Poke-in gap fills for the hand-listed diagonal-wall tiles: a triangle plus the two interior tiles
+	 * whose claim reveals it. The overlay draws each only when a bordering tile is claimed. Render-only.
+	 */
+	static List<GapFill> gapFills()
+	{
+		return GAP_FILLS;
+	}
+
+	/** The four unreachable center tiles, filled only once their whole ring is filled. Render-only. */
+	static int[][] centerTiles()
+	{
+		return CENTER_TILES;
+	}
+
+	/** The ring of tiles around the center; when all are filled, the center fills. */
+	static int[][] centerRing()
+	{
+		return CENTER_RING;
+	}
+
+	/** A gap triangle (three world corner points), its source tile (for fade tracking), and the two
+	 *  interior tiles whose claim reveals it. */
+	static final class GapFill
+	{
+		final int[] tile;
+		final double[][] triangle;
+		final int[] neighbourA;
+		final int[] neighbourB;
+
+		GapFill(int[] tile, double[][] triangle, int[] neighbourA, int[] neighbourB)
+		{
+			this.tile = tile;
+			this.triangle = triangle;
+			this.neighbourA = neighbourA;
+			this.neighbourB = neighbourB;
+		}
 	}
 
 	/** Map regions the area covers; the store reads claims from each. */
