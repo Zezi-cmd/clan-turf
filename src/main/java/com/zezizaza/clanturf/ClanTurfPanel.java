@@ -2826,17 +2826,22 @@ class ClanTurfPanel extends PluginPanel
 				// Measure the stat first so the name can be clipped to whatever space is left, then ellipsized
 				// if it still doesn't fit - a long alliance name shortens to "..." on the bar rather than
 				// running under the count (the world map shows it in full, stacked per word).
+				// Center each label vertically on its own metrics: baseline = top + (barH + ascent - descent)/2.
+				// The name and stat use different fonts, so a single shared baseline would misplace one of them.
 				g2.setFont(statFont);
-				int statW = g2.getFontMetrics().stringWidth(stat);
-				int textY = barY + (BAR_H + g2.getFontMetrics().getAscent()) / 2 - 2;
+				FontMetrics statFm = g2.getFontMetrics();
+				int statW = statFm.stringWidth(stat);
+				int statY = barY + (BAR_H + statFm.getAscent() - statFm.getDescent()) / 2;
 
 				g2.setFont(nameFont);
+				FontMetrics nameFm = g2.getFontMetrics();
+				int nameY = barY + (BAR_H + nameFm.getAscent() - nameFm.getDescent()) / 2;
 				int nameMaxW = bw - statW - 8 - 8 - 6; // bar minus stat, both 8px insets, plus a 6px gap
-				name = ellipsize(g2.getFontMetrics(), name, nameMaxW);
-				drawShadowed(g2, name, 8, textY, Color.WHITE);
+				name = ellipsize(nameFm, name, nameMaxW);
+				drawShadowed(g2, name, 8, nameY, Color.WHITE);
 
 				g2.setFont(statFont);
-				drawShadowed(g2, stat, bw - statW - 8, textY, Color.WHITE);
+				drawShadowed(g2, stat, bw - statW - 8, statY, Color.WHITE);
 
 				// Inline alliance-info drawer, opened by clicking the row's symbol.
 				if (r.icon > 0 && r.clan.equalsIgnoreCase(expandedClan))
