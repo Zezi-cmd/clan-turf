@@ -24,9 +24,13 @@
  */
 package com.zezizaza.clanturf;
 
+import java.awt.AlphaComposite;
 import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import net.runelite.client.util.ImageUtil;
 
 /**
  * Maps a clan name to a stable color. Deterministic, so two players who have never
@@ -82,6 +86,29 @@ final class ClanTurfColors
 	static Color forClan(String clanName)
 	{
 		return adjust(baseColor(clanName));
+	}
+
+	/** Color-wash strength for symbols; lower shows more of the symbol's own detail, higher reads more solid. */
+	static final float SYMBOL_TINT_ALPHA = 0.55f;
+
+	/**
+	 * A clan-motif symbol washed in a color: the symbol's own detail shows through a translucent color layer
+	 * (SRC_ATOP paints only where the symbol has pixels). Shared by the overhead tag, scoreboard bars and
+	 * world map so a symbol reads in its alliance's color everywhere. Callers should cache the result.
+	 */
+	static BufferedImage tintSymbol(BufferedImage raw, Color color, int size, float alpha)
+	{
+		BufferedImage base = size > 0 ? ImageUtil.resizeImage(raw, size, size) : raw;
+		int w = base.getWidth();
+		int h = base.getHeight();
+		BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = out.createGraphics();
+		g.drawImage(base, 0, 0, null);
+		g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, alpha));
+		g.setColor(color);
+		g.fillRect(0, 0, w, h);
+		g.dispose();
+		return out;
 	}
 
 	/** The clan's color before any color-blindness adjustment: a local override, else a stable hash. */

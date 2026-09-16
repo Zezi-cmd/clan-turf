@@ -24,6 +24,7 @@
  */
 package com.zezizaza.clanturf;
 
+import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -61,6 +62,9 @@ class ClanTurfWorldMapOverlay extends Overlay
 {
 	private static final int FILL_ALPHA = 60;
 	private static final int LINE_ALPHA = 210;
+	// The symbol is a solid mass vs the name's thin strokes, so the same gleam reads much stronger on it -
+	// scale the symbol's gleam down so the two shimmer at a matching intensity.
+	private static final float ICON_GLEAM_SCALE = 0.4f;
 
 	private final Client client;
 	private final WorldMapOverlay worldMapOverlay;
@@ -217,17 +221,40 @@ class ClanTurfWorldMapOverlay extends Overlay
 				graphics.setColor(Color.WHITE); // body sits steady in white; the clan color is the gleam
 				graphics.fill(body);
 
-				if (iconImg != null)
-				{
-					graphics.drawImage(iconImg, iconX, iconY, iconSize, iconSize, null);
-				}
-
-				// A single clan-color gleam sweeps across the name, then rests. Speed (time to cross),
-				// pause (dwell between sweeps), width, feather, and opacity are all set in Appearance.
+				// A single clan-color gleam sweeps across the name and the symbol, then rests. Speed (time to
+				// cross), pause (dwell between sweeps), width, feather, and opacity are all set in Appearance.
 				int gleamAlpha = config.gleamOpacity();
 				long speed = Math.max(1, config.gleamSpeedMs());
 				long pause = Math.max(0, config.gleamPauseMs());
 				long elapsed = System.currentTimeMillis() % (speed + pause);
+
+				if (iconImg != null)
+				{
+					// White symbol carrying the same clan-color gleam as the name, so the two match. Built in an
+					// offscreen buffer so the moving gradient (SRC_ATOP) lands only on the symbol's own pixels.
+					java.awt.image.BufferedImage symBuf = new java.awt.image.BufferedImage(
+							iconSize, iconSize, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+					Graphics2D sg = symBuf.createGraphics();
+					sg.drawImage(iconImg, 0, 0, iconSize, iconSize, null);
+					if (gleamAlpha > 0 && elapsed < speed)
+					{
+						float band = Math.max(1f, iconSize * config.gleamWidthPct() / 100f);
+						float cx = -band + (elapsed / (float) speed) * (iconSize + 2 * band);
+						float feather = Math.min(0.49f, Math.max(0.001f, config.gleamFeatherPct() / 100f));
+						int iconGleam = Math.round(gleamAlpha * ICON_GLEAM_SCALE);
+						Color edge = new Color(base.getRed(), base.getGreen(), base.getBlue(), 0);
+						Color core = new Color(base.getRed(), base.getGreen(), base.getBlue(), iconGleam);
+						sg.setComposite(AlphaComposite.SrcAtop);
+						sg.setPaint(new LinearGradientPaint(
+								new Point2D.Float(cx - band, 0), new Point2D.Float(cx + band, 0),
+								new float[]{0f, feather, 1f - feather, 1f},
+								new Color[]{edge, core, core, edge}));
+						sg.fillRect(0, 0, iconSize, iconSize);
+					}
+					sg.dispose();
+					graphics.drawImage(symBuf, iconX, iconY, null);
+				}
+
 				if (gleamAlpha > 0 && elapsed < speed)
 				{
 					Rectangle tb = body.getBounds();

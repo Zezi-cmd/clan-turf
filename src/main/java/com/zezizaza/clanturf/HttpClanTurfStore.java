@@ -66,6 +66,7 @@ class HttpClanTurfStore implements ClanTurfStore
 	private static final long FLUSH_MS = 1000;
 	private static final long BATTLES_POLL_MS = 15000; // the active-battles board updates slowly
 	private static final long ALLIANCES_POLL_MS = 20000; // alliances change rarely, so poll gently
+	private static final long ROSTER_POLL_MS = 20000; // opt-in overhead-indicator roster, changes rarely
 	private static final long CONNECT_GRACE_MS = 30000; // cold-start window before we call it down
 	private static final long STALE_MS = 45000; // no reply for this long = treat the server as down
 
@@ -89,6 +90,10 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile Map<String, String> allyNameById = Collections.emptyMap(); // allianceId -> name
 	private volatile Map<String, String> allyOwnerById = Collections.emptyMap(); // allianceId -> owner clan
 	private volatile Map<String, Integer> allyIconById = Collections.emptyMap(); // allianceId -> symbol sprite id
+	private volatile Map<String, String> allyColorById = Collections.emptyMap(); // allianceId -> 6-hex color
+
+	// Opt-in overhead-indicator roster from /roster: standardized player name(lower) -> allianceId.
+	private volatile Map<String, String> roster = Collections.emptyMap();
 
 	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
 	private volatile long startedMs;
@@ -126,6 +131,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		exec.scheduleWithFixedDelay(this::flush, FLUSH_MS, FLUSH_MS, TimeUnit.MILLISECONDS);
 		exec.scheduleWithFixedDelay(this::pollBattles, 0, BATTLES_POLL_MS, TimeUnit.MILLISECONDS);
 		exec.scheduleWithFixedDelay(this::pollAlliances, 0, ALLIANCES_POLL_MS, TimeUnit.MILLISECONDS);
+		exec.scheduleWithFixedDelay(this::pollRoster, 0, ROSTER_POLL_MS, TimeUnit.MILLISECONDS);
 		log.info("ClanTurf sync store started against {}", baseUrl);
 	}
 
@@ -469,6 +475,73 @@ class HttpClanTurfStore implements ClanTurfStore
 		allyNameById = nameById;
 		allyOwnerById = ownerById;
 		allyIconById = iconById;
+		allyColorById = colorById;
+	}
+
+	/** Pulls the opt-in roster: standardized player name -> alliance id, for overhead indicators. */
+	private void pollRoster()
+	{
+		if (!online)
+		{
+			return;
+		}
+		String body = send("GET", "/roster", null);
+		if (body == null)
+		{
+			return;
+		}
+		Map<String, String> next = new HashMap<>();
+		for (String line : body.split("\n"))
+		{
+			if (line.isBlank() || !line.startsWith("R,"))
+			{
+				continue;
+			}
+			String[] f = line.split(",", 3); // R,allianceId,name
+			if (f.length >= 3)
+			{
+				next.put(f[2].toLowerCase(), f[1]);
+			}
+		}
+		roster = next;
+	}
+
+	@Override
+	public AllianceTag allianceTagForPlayer(String playerName)
+	{
+		if (playerName == null)
+		{
+			return null;
+		}
+		String id = roster.get(playerName.toLowerCase());
+		if (id == null)
+		{
+			return null;
+		}
+		String hex = allyColorById.get(id);
+		if (hex == null)
+		{
+			return null; // alliance disbanded/unknown - show no badge rather than a wrong one
+		}
+		Integer icon = allyIconById.get(id);
+		return new AllianceTag(hex, icon == null ? 0 : icon, id);
+	}
+
+	@Override
+	public String allianceIdByDisplay(String display)
+	{
+		if (display == null)
+		{
+			return null;
+		}
+		for (Map.Entry<String, String> e : allyNameById.entrySet())
+		{
+			if (display.equalsIgnoreCase(e.getValue()) || display.equals(e.getKey()))
+			{
+				return e.getKey();
+			}
+		}
+		return null;
 	}
 
 	@Override
@@ -668,6 +741,28 @@ class HttpClanTurfStore implements ClanTurfStore
 	String allianceUnblacklist(String id, String clan, String target)
 	{
 		return sendResult("POST", "/alliance/unblacklist", form("id", id, "clan", clan, "target", target));
+	}
+
+	/** Opt in: publish this player's RSN under their alliance id for overhead indicators. */
+	String rosterOptIn(String name, String id)
+	{
+		return sendResult("POST", "/roster/optin", form("name", name, "id", id));
+	}
+
+	/** Opt out: remove this player's RSN from the public roster. */
+	String rosterOptOut(String name)
+	{
+		return sendResult("POST", "/roster/optout", form("name", name));
+	}
+
+	/** Kick an immediate roster re-poll so an opt-in/out shows over heads without waiting a full cycle. */
+	void refreshRoster()
+	{
+		ScheduledExecutorService e = exec;
+		if (e != null)
+		{
+			e.execute(this::pollRoster);
+		}
 	}
 
 	/**

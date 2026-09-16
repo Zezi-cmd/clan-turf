@@ -2814,7 +2814,10 @@ class ClanTurfPanel extends PluginPanel
 						int isz = BAR_H - 4;
 						int ix = bw + (ICON_GUTTER - isz) / 2;
 						int iy = barY + (BAR_H - isz) / 2;
-						g2.drawImage(img, ix, iy, isz, isz, null);
+						// Wash the symbol in the bar's clan/alliance color so it matches the overhead tag.
+						java.awt.image.BufferedImage tintedImg =
+								ClanTurfColors.tintSymbol(img, r.color, 0, ClanTurfColors.SYMBOL_TINT_ALPHA);
+						g2.drawImage(tintedImg, ix, iy, isz, isz, null);
 					}
 				}
 

@@ -98,6 +98,7 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ClanTurfTrackerOverlay trackerOverlay;
 	@Inject private ClanTurfWorldMapOverlay worldMapOverlay;
 	@Inject private ClanTurfBarkOverlay barkOverlay;
+	@Inject private ClanTurfAllianceOverlay allianceOverlay;
 	@Inject private AudioPlayer audioPlayer;
 
 	// The seam pays off here: both stores implement ClanTurfStore, and startUp picks one.
@@ -425,6 +426,7 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.add(trackerOverlay);
 		overlayManager.add(worldMapOverlay);
 		overlayManager.add(barkOverlay);
+		overlayManager.add(allianceOverlay);
 
 		// Start both stores once, for the plugin's whole lifetime. The server poller is then only
 		// paused/resumed on toggle (see selectStore), never recreated - a recreate-per-toggle
@@ -465,6 +467,7 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.remove(trackerOverlay);
 		overlayManager.remove(worldMapOverlay);
 		overlayManager.remove(barkOverlay);
+		overlayManager.remove(allianceOverlay);
 		clientToolbar.removeNavigation(navButton);
 		serverStore.setChangeListener(null);
 		localStore.setChangeListener(null);
@@ -555,6 +558,11 @@ public class ClanTurfPlugin extends Plugin
 			committedLeader = null;
 			applyWhitelist(); // switching online/offline changes whether the offline color list applies
 			refreshClaims();
+			syncRosterMembership(); // going online/offline changes whether we can publish the opt-in row
+		}
+		else if ("showPlayerIndicators".equals(key))
+		{
+			syncRosterMembership(); // toggled the opt-in: add or remove this player's roster row
 		}
 		// Recolor live when the custom-color toggle or either color list changes.
 		else if ("customClanColor".equals(key) || "clanColorWhitelist".equals(key)
@@ -624,6 +632,136 @@ public class ClanTurfPlugin extends Plugin
 			}
 			javax.swing.SwingUtilities.invokeLater(() -> lastOwnerInfoMs = 0); // refetch to reconcile
 		});
+	}
+
+	// ---- opt-in alliance roster (overhead name tags) ----
+
+	/** Name/alliance last published to the roster, so we only POST when something actually changes. */
+	private String lastRosterName;
+	private String lastRosterAllianceId;
+
+	/**
+	 * Keep this player's row in the public opt-in roster in step with the "Show alliance name tags" toggle
+	 * and their current alliance. Only their own standardized name and alliance id are ever sent, never a
+	 * location. Pushes only on a real change; opting out, leaving the alliance, or a disband removes the
+	 * row. A blank cold-start alliance poll is not treated as "left the alliance", so it never briefly
+	 * drops and re-adds the row. Server mode only.
+	 */
+	private void syncRosterMembership()
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		Player local = client.getLocalPlayer();
+		String name = local == null || local.getName() == null
+				? null : net.runelite.client.util.Text.standardize(local.getName());
+		if (name == null || name.isEmpty())
+		{
+			return;
+		}
+		boolean wantOptIn = config.showPlayerIndicators();
+		String clan = wantOptIn ? effectiveClanName() : null;
+		String aid = clan == null ? null : store.allianceIdOf(clan);
+		if (aid != null)
+		{
+			if (!aid.equals(lastRosterAllianceId) || !name.equals(lastRosterName))
+			{
+				rosterPush(name, aid);
+			}
+			return;
+		}
+		// No alliance to publish. Remove our row if we have one - but when opted in, only once alliance
+		// data has actually loaded, so a cold-start blank poll can't drop us and re-add us seconds later.
+		boolean dataLoaded = !store.allianceColors().isEmpty() || !store.allianceNames().isEmpty();
+		if (lastRosterAllianceId != null && (!wantOptIn || dataLoaded))
+		{
+			rosterRemove(lastRosterName != null ? lastRosterName : name);
+		}
+		lastRosterName = name;
+	}
+
+	private void rosterPush(String name, String aid)
+	{
+		lastRosterName = name;
+		lastRosterAllianceId = aid;
+		executor.execute(() ->
+		{
+			serverStore.rosterOptIn(name, aid);
+			serverStore.refreshRoster();
+		});
+	}
+
+	private void rosterRemove(String name)
+	{
+		lastRosterAllianceId = null;
+		executor.execute(() ->
+		{
+			serverStore.rosterOptOut(name);
+			serverStore.refreshRoster();
+		});
+	}
+
+	/** The opt-in alliance badge a nearby player published (overhead indicators), or null. Server only. */
+	ClanTurfStore.AllianceTag allianceTagForPlayer(String standardizedName)
+	{
+		return store.allianceTagForPlayer(standardizedName);
+	}
+
+	/**
+	 * This player's own alliance badge, derived locally from their clan's alliance (shared color, symbol,
+	 * name), or null if their clan isn't in one. Lets the overlay tag your whole clan without needing anyone
+	 * on the opt-in roster - you already know your clan and its alliance locally.
+	 */
+	ClanTurfStore.AllianceTag myAllianceTag()
+	{
+		String clan = effectiveClanName();
+		if (clan == null)
+		{
+			return null;
+		}
+		String hex = store.allianceColors().get(clan.toLowerCase());
+		if (hex == null)
+		{
+			return null;
+		}
+		return new ClanTurfStore.AllianceTag(hex, store.allianceIconOf(clan), store.allianceIdOf(clan));
+	}
+
+	/**
+	 * A 0..1 pulse over the takeover-animation window, else 0. Drives the overhead capture sparkle. Everyone
+	 * sees it, same as the tile shimmer - {@link #capturedAllianceId()} says whose symbols should sparkle.
+	 */
+	double capturePulse()
+	{
+		long start = animStartMs;
+		if (start <= 0)
+		{
+			return 0;
+		}
+		long el = System.currentTimeMillis() - start;
+		// Same window the overlay's takeover animation runs for.
+		long total = config.smallRiseMs() + config.smallFallMs() + config.fullRiseMs()
+				+ config.holdMs() + config.fallMs();
+		if (el <= 0 || el >= total)
+		{
+			return 0;
+		}
+		return Math.sin(Math.PI * (el / (double) total));
+	}
+
+	/**
+	 * The alliance id currently taking the GE during a takeover window, or null. Only that alliance's overhead
+	 * symbols sparkle, so it fires on the conqueror's members (seen by everyone) and never on the side that
+	 * just lost the GE.
+	 */
+	String capturedAllianceId()
+	{
+		if (capturePulse() <= 0)
+		{
+			return null;
+		}
+		return store.allianceIdByDisplay(committedLeader);
 	}
 
 	/** Split a comma-separated clan list into trimmed, non-empty names. */
@@ -716,6 +854,10 @@ public class ClanTurfPlugin extends Plugin
 			// Re-baseline the boundary silently so that relabel isn't announced as a bogus takeover.
 			leaderInit = false;
 		}
+
+		// Keep this player's opt-in roster row current: pushes only when the name or alliance changes, so
+		// switching clans, the clan changing alliance, or a disband all refresh what shows over your head.
+		syncRosterMembership();
 
 		// Keep the paint-as roster's "your clan" entry current as the clan channel loads or changes, and
 		// remember the name so it shows instantly next login instead of waiting for the channel.
@@ -2687,11 +2829,13 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
-		// [CT], "Grand Exchange" and the clan name in the clan's color, the rest white.
+		// [CT], "Grand Exchange" and the clan name in the clan's color, the rest white. The world is named
+		// so clanmates scattered across worlds know exactly which GE flipped (turf is per world).
 		String on = "<col=" + hex(ClanTurfColors.forClan(newLeader)) + ">";
 		String name = newLeader.toUpperCase(java.util.Locale.ROOT);
 		String msg = on + "[CT]" + RESET + " " + WHITE + "The " + RESET
-				+ on + "Grand Exchange" + RESET + WHITE + " belongs to " + RESET
+				+ on + "Grand Exchange" + RESET + WHITE + " on " + RESET
+				+ on + "World " + client.getWorld() + RESET + WHITE + " belongs to " + RESET
 				+ on + name + RESET + WHITE + "!" + RESET;
 		announceClan(msg);
 	}

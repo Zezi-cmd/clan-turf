@@ -142,6 +142,7 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 ### Network
 
 - **Use sync server** - Sync with other clans so the war is live (on by default). Off for local-only, nothing sent.
+- **Show alliance name tags** - Off by default. On, it draws the alliance color and symbol over the heads of players who have opted in, anywhere in the game, so you can pick out allies and rival alliances at a glance. Turning it on also opts you in: your name and alliance are added to a public roster that everyone running Clan Turf can read, until you turn it back off (you are removed shortly after). Only your name and alliance are shared, never your location.
 
 ![Network settings](images/confignetwork.png)
 
@@ -158,5 +159,5 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 
 - **Turf is per clan and per world.** You need to be in a clan to claim anything, and each world's Grand Exchange is its own separate battleground.
 - **For the best look, pair it with [Improved Tile Indicators](https://runelite.net/plugin-hub/show/improved-tile-indicators).** Enable **Draw overlays below player** and **Draw overlays below NPCs**, then add the GE NPCs to **NPCs to draw on top**. Pets can be set to **Draw below** via shift + right-click.
-- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, symbol, and passcode you enter. No account details or personal information are sent. Syncing pauses when you log out.
+- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, symbol, and passcode you enter. If you turn on **Show alliance name tags**, it additionally sends your player display name paired with your alliance, so opted-in players can be shown over each other's heads - this is opt-in, is removed shortly after you turn it off, and never includes your location. No account details, passwords, or location tracking are sent. Syncing pauses when you log out.
 - **No automation.** Clan Turf reads your position and draws overlays. Clan chat commands only read clan messages and display local formatted text. It never moves your character, sends chat, or performs automated game actions.

@@ -63,16 +63,23 @@ public interface ClanTurfConfig extends Config
 	String blockedAlliesSection = "blockedAlliesSection";
 
 	@ConfigSection(
+			name = "Alliances",
+			description = "Overhead alliance indicators - whose symbols and names to show, and where.",
+			position = 4
+	)
+	String alliancesSection = "alliancesSection";
+
+	@ConfigSection(
 			name = "Network",
 			description = "The sync server that makes rival clans visible to each other.",
-			position = 4
+			position = 5
 	)
 	String networkSection = "networkSection";
 
 	@ConfigSection(
 			name = "Extras",
 			description = "Reset countdown and the tiles-per-hour tracker.",
-			position = 5
+			position = 6
 	)
 	String extrasSection = "extrasSection";
 
@@ -359,6 +366,48 @@ public interface ClanTurfConfig extends Config
 			position = 14
 	)
 	default boolean useServer()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+			keyName = "showPlayerIndicators",
+			section = alliancesSection,
+			name = "Show player indicators",
+			description = "Float the alliance symbol, in the alliance color, over players' heads so you can spot "
+					+ "allies and rivals. This OPTS YOU IN: your name is added to a public roster so others can "
+					+ "see your symbol - only your name and alliance are sent, never your location, and you are "
+					+ "removed shortly after you turn this off.",
+			position = 0
+	)
+	default boolean showPlayerIndicators()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+			keyName = "showAllianceNames",
+			section = alliancesSection,
+			name = "Show names",
+			description = "Also draw the player's name, in the alliance color, under the symbol - but only for "
+					+ "players who aren't already named by the Player Indicators plugin or your own friends, clan "
+					+ "or team, so names never double up. Off: symbol only.",
+			position = 1
+	)
+	default boolean showAllianceNames()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+			keyName = "hideIndicatorsOutsideGe",
+			section = alliancesSection,
+			name = "Hide indicators outside GE",
+			description = "Only show the overhead symbols while you are at the Grand Exchange - they fade out as "
+					+ "you leave. Local only. Off: show them everywhere you go. On by default.",
+			position = 2
+	)
+	default boolean hideIndicatorsOutsideGe()
 	{
 		return true;
 	}

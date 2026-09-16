@@ -154,6 +154,36 @@ interface ClanTurfStore
 		return Collections.emptyMap();
 	}
 
+	/** A player's opted-in alliance badge for overhead indicators: the shared color, symbol and name. */
+	final class AllianceTag
+	{
+		final String colorHex;   // 6-hex RRGGBB
+		final int icon;          // clan-motif sprite id, 0 if none
+		final String allianceId; // alliance id, so the overlay can match the conquering alliance for a sparkle
+
+		AllianceTag(String colorHex, int icon, String allianceId)
+		{
+			this.colorHex = colorHex;
+			this.icon = icon;
+			this.allianceId = allianceId;
+		}
+	}
+
+	/** The alliance id whose display name (or id) is {@code display}, or null. Networked store only. */
+	default String allianceIdByDisplay(String display)
+	{
+		return null;
+	}
+
+	/**
+	 * The opt-in alliance badge a player (addressed by standardized RSN) has published, for overhead
+	 * indicators, or null if they aren't on the roster or their alliance is gone. Networked store only.
+	 */
+	default AllianceTag allianceTagForPlayer(String playerName)
+	{
+		return null;
+	}
+
 	/** Start any background work (e.g. the sync poller). No-op for the local store. */
 	default void start()
 	{
