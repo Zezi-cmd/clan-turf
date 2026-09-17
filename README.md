@@ -1,8 +1,16 @@
 # Clan Turf
 
-There are exactly 2,210 tiles you can stand on at the Grand Exchange - and Clan Turf turns every one of them into contested territory for your clan. Walk across a tile to claim it, stamped in your clan's color; step onto a rival's and it flips to yours. A live sync server shows every clan's turf in real time, per world, so the whole GE becomes a running turf war that resets fresh each day.
+There are exactly 2,210 tiles you can stand on at the Grand Exchange, and Clan Turf turns every one of them into contested territory for your clan. Walk across a tile to claim it, stamped in your clan's color; step onto a rival's and it flips to yours. A live sync server shows every clan's turf in real time, per world, so the whole GE becomes a running turf war that resets fresh each day.
 
 ![Hero](images/hero.png)
+
+## Where to find things ![Clan Turf icon](images/icon.png)
+
+Clan Turf has two homes. The **Clan Turf side panel**, opened from the RuneLite sidebar, is your live dashboard for the scoreboard, Active Battles, alliance controls, Community Claims, and the offline sandbox.
+
+Everything you can toggle or customize, from visuals and sounds to clan colors and alliance player indicators, is found in the plugin's **settings** under the wrench (Configuration) button.
+
+Throughout this README, "in the panel" refers to the Clan Turf side panel, while any bold setting name refers to an option found in the plugin's settings.
 
 ## Claim turf by walking
 
@@ -10,7 +18,7 @@ Step on any Grand Exchange tile to claim it for your clan. Walk onto a rival's t
 
 ![Territory](images/territory.png)
 
-As you run, an optional trail effect marks your path in your clan's color - a slick ripple of little walls that cascades out behind you before fading away. Not in a clan? The trail runs neutral white, so you still get the walking visual at the GE even though you can't claim.
+As you run, an optional trail effect marks your path in your clan's color: a slick ripple of little walls that cascades out behind you before fading away. Not in a clan? The trail runs neutral white, so you still get the walking visual at the GE even though you can't claim.
 
 ![Snail trail](images/snailtrail.png)
 
@@ -28,7 +36,7 @@ Take the GE while you're standing in it and the whole cast of Grand Exchange NPC
 
 ## Pre-claimed pockets
 
-Parts of the Grand Exchange aren't walkable - the stools, the stalls, the walls, the foliage. Rather than leave holes in a clan's territory, Clan Turf fills those pockets in the current owner's color (white while the GE is unclaimed) so turf reads as one solid block, and they recolor on takeover right along with the boundary. Purely cosmetic: these tiles are never claimable and never counted. Turn it off with **Show Pre-Claims**.
+Parts of the Grand Exchange aren't walkable: the stools, the stalls, the walls, the foliage. By default these pockets only fill in a clan's color where that clan's claims already surround them, so a fresh GE stays clean. Turn on **Show Pre-Claims** and every pocket fills in the current owner's color (white while the GE is unclaimed), so a clan's turf reads as one solid block and the pockets recolor on takeover right along with the boundary. Either way it is purely cosmetic: these tiles are never claimable and never counted.
 
 ![Pre-claims](images/preclaims.png)
 
@@ -40,23 +48,43 @@ The GE is tinted on your minimap in the current owner's color. On the world map,
 
 ## Live scoreboard
 
-The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds. An alliance carries its symbol on the right of its bar - click the symbol to expand a breakdown of how many tiles each allied clan has put in, while the bar keeps showing the team's combined total.
+The side panel ranks every clan on your world by tiles held, with each clan's share of the GE. The bars slide into place as the fight unfolds. An alliance carries its symbol on the right of its bar. Click that symbol to expand the bar into a breakdown of how many tiles each allied clan has put in, while the bar itself keeps showing the team's combined total. Click again to collapse it.
 
 ![Scoreboard](images/scoreboard.png)
 
+![Scoreboard expanded](images/scoreboardexpanded.png)
+
 ## Active battles
 
-See which worlds are contested, with the leading clan and closest rival shown for each world, so you know where to head next.
+The **Active battles** list in the side panel shows which worlds are contested, with the leading clan and closest rival for each world, so you know where to head next. Your current world always stays pinned at the top; click the **Tiles**, **World**, or **Owner** header to sort the rest, and click again to flip the direction.
 
 ![Active battles](images/activebattles.png)
 
 ## Alliances
 
-Team up with other clans. One clan creates an alliance and shares a passcode; any clan that joins is treated as one team - allied clans stop taking each other's tiles, and their turf shows in a single shared color and counts as one on the scoreboard, the leader, and the Active Battles board that everyone sees. Two clans mid-battle can trade a code and merge their tiles on the spot.
+Team up with other clans. One clan creates an alliance and shares a passcode; any clan that joins is treated as one team: allied clans stop taking each other's tiles, and their combined turf shows in a single shared color and counts as one clan on the scoreboard, the leader, and the Active Battles board that everyone sees. Two clans in the middle of a fight can trade a code and merge their tiles on the spot.
 
-Alliances live in a collapsible **Alliance** section in the side panel, managed by your clan's leadership (Owner, Deputy, or Admin). The clan that creates the alliance owns it and can recolor it, give it a symbol, remove clans, change the passcode, or disband it; a clan that only joined gets a **Leave alliance** button instead. Prefer a different shade? Clicking your own clan's scoreboard bar to pick a local color still overrides the alliance color for your view.
+### Creating one
 
-Pick one of the game's official clan symbols for your alliance and it shows everywhere the alliance does: large above the name on the world map, on its scoreboard bar, and beside its name in the panel. The passcode is just a code you make up to control who can join - it is never your RuneScape or Jagex account password, and Clan Turf will never ask for that.
+Alliances live in a collapsible **Alliance** section in the side panel, and only your clan's leadership (Owner, Deputy, or Admin) can set one up. Give it a name (up to two words, ten letters each), pick a shared color and one of the game's official clan symbols, and set a passcode, or leave it blank and one is generated for you. Hit **Create alliance** and your clan owns it.
+
+### Joining one
+
+Get the passcode from whoever runs the alliance, drop it into the **Join an alliance** box in the same panel, and hit **Join alliance**. That is the whole handshake, no invites and no waiting. Your clan's turf immediately merges into the alliance's color and total.
+
+### Running it
+
+The clan that created the alliance owns it: from the panel it can recolor the alliance, change its symbol, copy or change the passcode (click the passcode to copy it), remove a clan, or disband the whole thing. A clan that only joined gets a **Leave alliance** button instead. A removed or blocked clan is listed under the **Blocked allies** settings section and cannot rejoin until you take it back off that list. Prefer a different shade for your own eyes? Clicking your own clan's scoreboard bar to pick a local color still overrides the alliance color for your view only.
+
+The alliance symbol shows everywhere the alliance does: large above the name on the world map, on its scoreboard bar, and beside its name in the panel. The passcode is just a code you make up to control who can join. It is never your RuneScape or Jagex account password, and Clan Turf will never ask for that.
+
+### Player indicators
+
+Turn on **Show player indicators** in the settings and the alliance's symbol, in the alliance color, floats over the heads of alliance members around you, so in a crowded fight you can pick out who is on your side and who is not at a glance. Your own clanmates are tagged automatically from local data. To see players from *other* clans in your alliance, both of you need this turned on: switching it on opts you in, adding your name and alliance to a public roster that everyone running Clan Turf can read, so opted-in players can be shown over each other's heads. Only your name and alliance are ever shared, never your location, and you are removed from the roster shortly after you turn it back off.
+
+By default the symbols show only while you are at the Grand Exchange and fade out as you leave (**Hide indicators outside GE** controls that). **Show names** adds the player's name under the symbol, skipping anyone the Player Indicators plugin or your own friends, clan, or team already name so nothing doubles up, and **Indicator opacity** sets how strong the symbol looks. All four live in the **Alliances** settings section.
+
+![Alliance player indicator](images/allianceplayerindicator.png)
 
 ## Rally your clan in chat
 
@@ -64,21 +92,21 @@ Type `!defend 307` or `!invade 420` in clan chat (`!def` and `!inv` also work) t
 
 ## Community Claims
 
-A running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in.
+At the bottom of the side panel, a running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in.
 
 ![Community Claims](images/comclaim.png)
 
 ## Pick your clan colors
 
-Every clan is auto-assigned its own color, but you can override any of them. Hover a bar in the side panel to highlight it and click to open the color wheel - pick a color for your own clan or a rival's. Your picks are saved to a local color list you can copy and paste to share a whole palette with clanmates. It's all local, so everyone else still sees their own colors.
+Every clan is auto-assigned its own color, but you can override any of them. Hover a bar in the side panel to highlight it and click to open the color wheel, then pick a color for your own clan or a rival's. Your picks are saved to a local color list you can copy and paste to share a whole palette with clanmates. It's all local, so everyone else still sees their own colors.
 
-Colorblind? A **Colorblind mode** in the settings adjusts every clan color, auto and custom alike, to be easier to tell apart - protanopia, deuteranopia, or tritanopia.
+Colorblind? A **Colorblind mode** in the settings adjusts every clan color, auto and custom alike, to be easier to tell apart: protanopia, deuteranopia, or tritanopia.
 
 ![Colorblind](images/colorblind.png)
 
 ## Tiles per hour
 
-The **Tiles/hour tracker** shows **Tiles Claimed**, **Current TPH**, and **Max TPH** in a draggable overlay. It persists across world hops and relogs. Shift + right-click the tracker to **Reset run** or **Reset all**.
+Enable the **Tiles/hour tracker** in the settings and it shows **Tiles Claimed**, **Current TPH**, and **Max TPH** in a draggable on-screen overlay. It persists across world hops and relogs. Shift + right-click the tracker to **Reset run** or **Reset all**.
 
 ![Tiles per hour](images/tph.png)
 
@@ -115,7 +143,7 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 - **Tint GE on minimap** / **Minimap opacity** - Shade the GE on the minimap in the owner's color, and how strong.
 - **Tint GE on world map** / **Worldmap opacity** - Shade and outline the GE on the world map in the owner's color with the clan name (works anywhere), and how strong the tint is.
 - **Show GE boundary** - Draw the GE border line on screen.
-- **Show Pre-Claims** - Fill the unwalkable GE pockets in the owner's color (white when unclaimed). Cosmetic; never counted.
+- **Show Pre-Claims** - Off by default. On, fill every unwalkable GE pocket in the owner's color (white when unclaimed) so turf reads solid; off, a pocket fills only where a clan's claims border it. Cosmetic; never counted.
 - **Snail trail** - Leave a fading clan-colored trail behind you. Does not affect claims or TPH.
 - **Tile walls** - Toggle all raised wall effects: tile captures, takeovers, and the snail trail.
 
@@ -126,7 +154,7 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 - **Border animation** - On a takeover, raise the boundary into a wall, or just fade it to the new color (flat).
 - **Announce takeovers** - Post a clan-tab message when the GE changes hands.
 - **Takeover sound** / **Takeover volume** - Play a cue on takeover, and set how loud.
-- **NPC takeover barks** - When the GE changes hands while you're there, the Grand Exchange NPCs react with overhead chatter naming the new owner, in that clan's color with a little wave. Visual only, never posted to chat.
+- **NPC takeover text** - When the GE changes hands while you're there, the Grand Exchange NPCs react with overhead chatter naming the new owner, in that clan's color with a little wave. Visual only, never posted to chat.
 
 ![Takeover settings](images/configtakeover.png)
 
@@ -139,10 +167,23 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 
 ![Clan settings](images/configclan.png)
 
+### Blocked allies
+
+- **Blocked clans** - Clan names, comma-separated, barred from joining your alliance (only applies while your clan owns one). The kick x in the Alliance panel adds a name here; remove one to un-block that clan.
+
+### Alliances
+
+- **Show player indicators** - Off by default. Float the alliance symbol, in the alliance color, over alliance members' heads so you can spot allies and rivals. Turning it on opts you in: your name and alliance are added to a public roster everyone running Clan Turf can read, so others can see your symbol. Only your name and alliance are sent, never your location, and you're removed shortly after you turn it off.
+- **Show names** - On by default. Also draw the player's name under the symbol, skipping anyone Player Indicators or your own friends, clan, or team already name so names never double up.
+- **Hide indicators outside GE** - On by default. Only show the symbols at the Grand Exchange; they fade out as you leave. Local only.
+- **Indicator opacity** - Max opacity of the overhead alliance symbol and name (0 = invisible, 100 = full).
+
+![Alliances settings](images/configallianceunchecked.png) ![Alliances settings with indicators on](images/configalliancechecked.png)
+
 ### Network
 
 - **Use sync server** - Sync with other clans so the war is live (on by default). Off for local-only, nothing sent.
-- **Show alliance name tags** - Off by default. On, it draws the alliance color and symbol over the heads of players who have opted in, anywhere in the game, so you can pick out allies and rival alliances at a glance. Turning it on also opts you in: your name and alliance are added to a public roster that everyone running Clan Turf can read, until you turn it back off (you are removed shortly after). Only your name and alliance are shared, never your location.
+- **Server URL** - The sync server address. Leave as-is unless you run your own.
 
 ![Network settings](images/confignetwork.png)
 
@@ -159,5 +200,5 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 
 - **Turf is per clan and per world.** You need to be in a clan to claim anything, and each world's Grand Exchange is its own separate battleground.
 - **For the best look, pair it with [Improved Tile Indicators](https://runelite.net/plugin-hub/show/improved-tile-indicators).** Enable **Draw overlays below player** and **Draw overlays below NPCs**, then add the GE NPCs to **NPCs to draw on top**. Pets can be set to **Draw below** via shift + right-click.
-- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, symbol, and passcode you enter. If you turn on **Show alliance name tags**, it additionally sends your player display name paired with your alliance, so opted-in players can be shown over each other's heads - this is opt-in, is removed shortly after you turn it off, and never includes your location. No account details, passwords, or location tracking are sent. Syncing pauses when you log out.
+- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, symbol, and passcode you enter. If you turn on **Show player indicators**, it additionally sends your player display name paired with your alliance, so opted-in players can be shown over each other's heads. This is opt-in, is removed shortly after you turn it off, and never includes your location. No account details, passwords, or location tracking are sent. Syncing pauses when you log out.
 - **No automation.** Clan Turf reads your position and draws overlays. Clan chat commands only read clan messages and display local formatted text. It never moves your character, sends chat, or performs automated game actions.
