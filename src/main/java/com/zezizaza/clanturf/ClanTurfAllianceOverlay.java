@@ -56,9 +56,10 @@ class ClanTurfAllianceOverlay extends Overlay
 {
 	private static final int SYMBOL_SIZE = 22;
 	private static final int NAME_Z_OFFSET = 40; // the name line; the symbol sits a fixed pixel gap above it
-	private static final double FADE_STEP = 0.08; // per-frame ease for the GE fade in/out
+	private static final double FADE_MS = 400.0; // fade in/out duration, frame-rate independent
 
-	private double geFade; // 0..1, eases up near the GE and down away from it
+	private double fade; // 0..1, eases toward "should the symbols be showing at all"
+	private long lastRenderMs; // for a time-based fade that doesn't depend on frame rate
 
 	private final Client client;
 	private final ClanTurfPlugin plugin;
@@ -83,19 +84,19 @@ class ClanTurfAllianceOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.showPlayerIndicators())
+		// One time-based fade covering both opting in/out and GE proximity, so nothing pops. Target is
+		// visible when indicators are on and - if "Hide indicators outside GE" is set - you are near the GE.
+		long nowMs = System.currentTimeMillis();
+		double dt = lastRenderMs == 0 ? 16.0 : Math.min(200.0, nowMs - lastRenderMs);
+		lastRenderMs = nowMs;
+		boolean visible = config.showPlayerIndicators()
+				&& (plugin.isNearGe() || !config.hideIndicatorsOutsideGe());
+		fade = Math.max(0.0, Math.min(1.0, fade + (visible ? dt : -dt) / FADE_MS));
+		if (fade <= 0.0)
 		{
 			return null;
 		}
-		// Others' symbols fade in near the GE and out when away. Your own follows that same fade when "Hide
-		// personal indicator" is on (shown at the GE, hidden away); when off it always shows, GE or not.
-		geFade = Math.max(0.0, Math.min(1.0, geFade + (plugin.isNearGe() ? FADE_STEP : -FADE_STEP)));
-		// "Hide indicators outside GE" on = every symbol fades with your GE proximity; off = always full alpha.
-		double alpha = config.hideIndicatorsOutsideGe() ? geFade : 1.0;
-		if (alpha <= 0.0)
-		{
-			return null;
-		}
+		double alpha = fade;
 		boolean drawNames = config.showAllianceNames();
 		ClanChannel clanChannel = client.getClanChannel();
 		// Your own clan shares your alliance, and you know that locally - no opt-in needed. Computed once.
