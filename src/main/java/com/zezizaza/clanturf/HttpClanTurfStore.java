@@ -24,11 +24,6 @@
  */
 package com.zezizaza.clanturf;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -46,6 +41,12 @@ import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 /**
  * Networked store: the same {@link ClanTurfStore} seam, backed by the sync server instead
@@ -70,9 +71,8 @@ class HttpClanTurfStore implements ClanTurfStore
 	private static final long STALE_MS = 45000; // no reply for this long = treat the server as down
 
 	private final ClanTurfConfig config;
-	private final HttpClient http = HttpClient.newBuilder()
-			.connectTimeout(Duration.ofSeconds(5))
-			.build();
+	private static final MediaType TEXT = MediaType.get("text/plain; charset=utf-8");
+	private final OkHttpClient http;
 
 	private ScheduledExecutorService exec;
 	private volatile String baseUrl = "http://localhost:8080";
@@ -104,9 +104,13 @@ class HttpClanTurfStore implements ClanTurfStore
 	private final Object cacheLock = new Object();
 
 	@Inject
-	HttpClanTurfStore(ClanTurfConfig config)
+	HttpClanTurfStore(ClanTurfConfig config, OkHttpClient okHttpClient)
 	{
 		this.config = config;
+		// Reuse RuneLite's shared OkHttpClient (connection pool, proxy, TLS); just add a call timeout.
+		this.http = okHttpClient.newBuilder()
+				.callTimeout(Duration.ofSeconds(5))
+				.build();
 	}
 
 	@Override
@@ -701,22 +705,32 @@ class HttpClanTurfStore implements ClanTurfStore
 		return sb.toString();
 	}
 
+	/** Builds an OkHttp request: GET, or the given method with a text body (an empty body is fine for POST). */
+	private Request request(String method, String path, String body)
+	{
+		Request.Builder b = new Request.Builder().url(baseUrl + path);
+		if ("GET".equals(method))
+		{
+			b.get();
+		}
+		else
+		{
+			b.method(method, RequestBody.create(TEXT, body == null ? "" : body));
+		}
+		return b.build();
+	}
+
 	/** Like {@link #send} but returns the body on any status, so callers can read the server's error text. */
 	private String sendResult(String method, String path, String body)
 	{
-		try
+		try (Response resp = http.newCall(request(method, path, body)).execute())
 		{
-			HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(baseUrl + path))
-					.timeout(Duration.ofSeconds(5));
-			b.method(method, body == null
-					? HttpRequest.BodyPublishers.noBody()
-					: HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-			HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-			if (resp.statusCode() / 100 == 2)
+			if (resp.isSuccessful())
 			{
 				lastOkMs = System.currentTimeMillis();
 			}
-			return resp.body();
+			ResponseBody rb = resp.body();
+			return rb == null ? "" : rb.string();
 		}
 		catch (Exception e)
 		{
@@ -752,25 +766,13 @@ class HttpClanTurfStore implements ClanTurfStore
 
 	private String send(String method, String path, String body)
 	{
-		try
+		try (Response resp = http.newCall(request(method, path, body)).execute())
 		{
-			HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(baseUrl + path))
-					.timeout(Duration.ofSeconds(5));
-			if ("GET".equals(method))
-			{
-				b.GET();
-			}
-			else
-			{
-				b.method(method, body == null
-						? HttpRequest.BodyPublishers.noBody()
-						: HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-			}
-			HttpResponse<String> resp = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
-			if (resp.statusCode() / 100 == 2)
+			if (resp.isSuccessful())
 			{
 				lastOkMs = System.currentTimeMillis();
-				return resp.body();
+				ResponseBody rb = resp.body();
+				return rb == null ? "" : rb.string();
 			}
 			return null;
 		}
