@@ -84,7 +84,7 @@ Turn on **Show player indicators** in the settings and the alliance's symbol, in
 
 By default the symbols show only while you are at the Grand Exchange and fade out as you leave (**Hide indicators outside GE** controls that). **Show names** adds the player's name under the symbol, skipping anyone the Player Indicators plugin or your own friends, clan, or team already name so nothing doubles up, and **Indicator opacity** sets how strong the symbol looks. All four live in the **Alliances** settings section.
 
-![Alliance player indicator](images/allianceplayerindicator.png)
+![Alliance player indicator](images/allianceplayerindicator.png) ![Alliance player indicator](images/allianceplayerindicator2.png)
 
 ## Rally your clan in chat
 
