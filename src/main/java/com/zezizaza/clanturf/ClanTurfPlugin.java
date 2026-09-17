@@ -289,17 +289,16 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v2";
+	private static final String UPDATE_ID = "v3";
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
-	private static final boolean ALWAYS_SHOW_UPDATE = false;
+	private static final boolean ALWAYS_SHOW_UPDATE = true;
 	/** Header label. Kept as "[Update]" for now. Set to null in a future release to auto-use the
 	 *  Hub-built jar version instead (see updateMessage()). */
 	private static final String UPDATE_LABEL = "[Update]";
 	private static final String[] UPDATE_LINES = {
-		"New: Alliances. Team up with other clans - allied tiles share one color and count as one team.",
-		"Owners and Admins of your clan can create an alliance with a passcode or join one, all from the side panel.",
-		"The clan that made the alliance can recolor it, remove clans, or disband it.",
+		"New: Alliance player indicators. Your alliance's symbol can float over allied players' heads so you can tell friend from foe anywhere.",
+		"Turn on Show player indicators in the Alliances settings to see players from other clans. It opts you in: your name and alliance join a public roster, never your location, and you are removed the moment you turn it back off.",
 	};
 
 	/** Set when we log in with an unseen update; the changelog fires on the next game tick, since chat
@@ -1686,6 +1685,15 @@ public class ClanTurfPlugin extends Plugin
 				{
 					ClanTurfColors.setOverride(disp, col);
 					allianceApplied.add(disp.toLowerCase());
+				}
+				// The Active-battles board aggregates a held world under the ALLIANCE name, so rally calls
+				// and takeover messages resolve their color via forClan("<alliance name>"). Register that
+				// name too, or it misses the override and falls back to a hashed default color.
+				String aName = store.allianceNameOf(e.getKey());
+				if (aName != null && !aName.isEmpty())
+				{
+					ClanTurfColors.setOverride(aName, col);
+					allianceApplied.add(aName.toLowerCase());
 				}
 			}
 		}
