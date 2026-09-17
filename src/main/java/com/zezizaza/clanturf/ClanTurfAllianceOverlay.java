@@ -40,7 +40,6 @@ import net.runelite.api.Point;
 import net.runelite.api.clan.ClanChannel;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.overlay.Overlay;
-import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.OverlayUtil;
 import net.runelite.client.util.Text;
@@ -77,8 +76,9 @@ class ClanTurfAllianceOverlay extends Overlay
 		this.plugin = plugin;
 		this.config = config;
 		this.spriteManager = spriteManager;
+		// Default layer (UNDER_WIDGETS), same as RuneLite's Player Indicators, so the symbol sorts on top of
+		// players like the name plates do - ABOVE_SCENE gets drawn into the scene and occluded by the GPU plugin.
 		setPosition(OverlayPosition.DYNAMIC);
-		setLayer(OverlayLayer.ABOVE_SCENE);
 	}
 
 	@Override
@@ -96,7 +96,9 @@ class ClanTurfAllianceOverlay extends Overlay
 		{
 			return null;
 		}
-		double alpha = fade;
+		// The opacity slider dims only the symbol; names ride the GE fade at full opacity.
+		float symbolAlpha = (float) (fade * (config.indicatorOpacity() / 100.0));
+		float nameAlpha = (float) fade;
 		boolean drawNames = config.showAllianceNames();
 		ClanChannel clanChannel = client.getClanChannel();
 		// Your own clan shares your alliance, and you know that locally - no opt-in needed. Computed once.
@@ -106,7 +108,6 @@ class ClanTurfAllianceOverlay extends Overlay
 		double pulse = plugin.capturePulse();
 		String flashAid = pulse > 0.01 ? plugin.capturedAllianceId() : null;
 		java.awt.Composite origComposite = graphics.getComposite();
-		graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float) alpha));
 		for (Player p : client.getPlayers())
 		{
 			if (p == null || p.getName() == null)
@@ -145,12 +146,14 @@ class ClanTurfAllianceOverlay extends Overlay
 				continue;
 			}
 			int symY = namePt.getY() - graphics.getFontMetrics().getAscent() - SYMBOL_SIZE - 2;
+			graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, symbolAlpha));
 			graphics.drawImage(symbol, imgPt.getX(), symY, null);
 
-			// Optionally the name too, but only for players Player Indicators (or your own friend/clan/team
-			// relationships) isn't already naming, so names never double up.
+			// Optionally the name too (at full opacity - the slider is symbol-only), but only for players
+			// Player Indicators (or your own friend/clan/team relationships) isn't already naming.
 			if (color != null && drawNames && !coveredByPlayerIndicators(p))
 			{
+				graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, nameAlpha));
 				OverlayUtil.renderTextLocation(graphics, namePt, p.getName(), color);
 			}
 		}

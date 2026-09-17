@@ -242,6 +242,7 @@ class ClanTurfOverlay extends Overlay
 		// This map never reaches the server or the scoreboard count, so these tiles stay uncounted.
 		mirrorClaim(owner, 3188, 3480, 3189, 3479);
 		mirrorClaim(owner, 3187, 3477, 3188, 3478);
+		mirrorClaim(owner, 3174, 3469, 3173, 3468);
 
 		// Pre-claims (the unwalkable filler pockets + the diagonal-wall gap slivers). Show Pre-Claims ON:
 		// the solid-GE look - everything shown in the GE owner's color (white when unclaimed), tagged in the

@@ -118,6 +118,15 @@ class ClanTurfPanel extends PluginPanel
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
 
+	/** Sort for the Active-battles list below the pinned current world (session state, defaults to most tiles). */
+	private enum BattleSort { WORLD, OWNER, TILES }
+	private BattleSort battleSort = BattleSort.TILES;
+	private boolean battleSortDesc = true;
+	// Last data handed to updateBattles, so a header click can re-sort without waiting for the next poll.
+	private List<ClanTurfBattle> lastBattles = new ArrayList<>();
+	private String lastBattlesMyClan;
+	private int lastBattlesWorld;
+
 	// Alliance section (collapsible, sits under Active battles).
 	private final JLabel allianceHeader = new JLabel();
 	private final JPanel allianceBody = new JPanel();
@@ -1250,6 +1259,9 @@ class ClanTurfPanel extends PluginPanel
 			}
 			// Skip the teardown/rebuild when nothing changed, so the list doesn't flash every refresh.
 			// A pending reveal always rebuilds (it needs fresh rows to cascade in).
+			lastBattles = list;
+			lastBattlesMyClan = myClan;
+			lastBattlesWorld = currentWorld;
 			String sig = battlesSignature(list, myClan, currentWorld);
 			if (!revealBattlesPending && sig.equals(lastBattlesSig))
 			{
@@ -1270,8 +1282,36 @@ class ClanTurfPanel extends PluginPanel
 				boolean cascade = revealBattlesPending; // set when we just came online
 				revealBattlesPending = false;
 				long base = System.currentTimeMillis() + REVEAL_BATTLES_DELAY;
-				int i = 0;
+
+				// Your current world pins to the top; the rest sort by the chosen column.
+				ClanTurfBattle pinned = null;
+				List<ClanTurfBattle> rest = new ArrayList<>();
 				for (ClanTurfBattle b : list)
+				{
+					if (pinned == null && b.getWorld() == currentWorld)
+					{
+						pinned = b;
+					}
+					else
+					{
+						rest.add(b);
+					}
+				}
+				rest.sort(battleComparator());
+
+				int i = 0;
+				if (pinned != null)
+				{
+					FadePanel row = battleRow(pinned, myClan, currentWorld);
+					battlesBox.add(row);
+					if (cascade)
+					{
+						scheduleReveal(row, base + i * REVEAL_ROW_STAGGER);
+					}
+					i++;
+				}
+				battlesBox.add(battleSortHeader());
+				for (ClanTurfBattle b : rest)
 				{
 					FadePanel row = battleRow(b, myClan, currentWorld);
 					battlesBox.add(row);
@@ -1343,6 +1383,73 @@ class ClanTurfPanel extends PluginPanel
 		});
 		base.addAll(fresh);
 		return base;
+	}
+
+	/** Comparator for the non-pinned battle rows, per the chosen column and direction. */
+	private java.util.Comparator<ClanTurfBattle> battleComparator()
+	{
+		if (battleSort == BattleSort.OWNER)
+		{
+			// Cluster same owners; direction flips the owner order, tiles stay high-to-low within a group.
+			java.util.Comparator<ClanTurfBattle> byOwner = java.util.Comparator.comparing(
+					(ClanTurfBattle b) -> b.getOwner() == null ? "" : b.getOwner().toLowerCase());
+			if (battleSortDesc)
+			{
+				byOwner = byOwner.reversed();
+			}
+			return byOwner.thenComparing(
+					java.util.Comparator.comparingInt(ClanTurfBattle::getOwnerTiles).reversed());
+		}
+		java.util.Comparator<ClanTurfBattle> c = battleSort == BattleSort.WORLD
+				? java.util.Comparator.comparingInt(ClanTurfBattle::getWorld)
+				: java.util.Comparator.comparingInt(ClanTurfBattle::getOwnerTiles);
+		return battleSortDesc ? c.reversed() : c;
+	}
+
+	/** The clickable World / Owner / Tiles sort bar shown under the pinned current-world row. */
+	private JPanel battleSortHeader()
+	{
+		JPanel bar = new JPanel();
+		bar.setLayout(new BoxLayout(bar, BoxLayout.X_AXIS));
+		bar.setOpaque(false);
+		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		bar.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0)); // breathing room above and below
+		bar.add(sortLabel("Tiles", BattleSort.TILES)); // default sort, so it leads
+		bar.add(Box.createHorizontalStrut(10));
+		bar.add(sortLabel("World", BattleSort.WORLD));
+		bar.add(Box.createHorizontalStrut(10));
+		bar.add(sortLabel("Owner", BattleSort.OWNER));
+		bar.add(Box.createHorizontalGlue());
+		return bar;
+	}
+
+	/** One sort column label; shows an arrow when active, click to select it or flip its direction. */
+	private JLabel sortLabel(String text, BattleSort key)
+	{
+		boolean active = battleSort == key;
+		JLabel l = new JLabel(text + (active ? (battleSortDesc ? " ▾" : " ▴") : ""));
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setForeground(active ? ColorScheme.BRAND_ORANGE : ColorScheme.LIGHT_GRAY_COLOR);
+		l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		l.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (battleSort == key)
+				{
+					battleSortDesc = !battleSortDesc; // same column: flip direction
+				}
+				else
+				{
+					battleSort = key;
+					battleSortDesc = true; // new column: default descending
+				}
+				lastBattlesSig = null; // force a rebuild with the new sort
+				updateBattles(new ArrayList<>(lastBattles), lastBattlesMyClan, lastBattlesWorld);
+			}
+		});
+		return l;
 	}
 
 	private FadePanel battleRow(ClanTurfBattle b, String myClan, int currentWorld)
@@ -1732,7 +1839,11 @@ class ClanTurfPanel extends PluginPanel
 		allianceNameLabel.setFont(HEADER_FONT);
 		allianceNameLabel.setForeground(ColorScheme.BRAND_ORANGE);
 		allianceNameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		// The alliance symbol sits to the left of the name, as one row.
+		// The alliance symbol sits to the left of the name, as one row. Bottom-align all three so the name
+		// text lines up on the bottom edge of the (taller) icons rather than floating up.
+		allianceNameLabel.setAlignmentY(Component.BOTTOM_ALIGNMENT);
+		allianceIconLabel.setAlignmentY(Component.BOTTOM_ALIGNMENT);
+		allianceIconLabelR.setAlignmentY(Component.BOTTOM_ALIGNMENT);
 		allianceIconLabel.setVisible(false);
 		allianceIconLabelR.setVisible(false);
 		allianceNameRow.setLayout(new BoxLayout(allianceNameRow, BoxLayout.X_AXIS));

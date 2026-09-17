@@ -413,6 +413,19 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
+			keyName = "indicatorOpacity",
+			section = alliancesSection,
+			name = "Indicator opacity",
+			description = "Max opacity of the overhead alliance symbol and name (0 = invisible, 100 = full).",
+			position = 3
+	)
+	@Range(min = 0, max = 100)
+	default int indicatorOpacity()
+	{
+		return 85;
+	}
+
+	@ConfigItem(
 			keyName = "resetCountdown",
 			section = extrasSection,
 			name = "Reset countdown",
