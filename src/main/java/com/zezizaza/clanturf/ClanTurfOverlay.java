@@ -243,6 +243,10 @@ class ClanTurfOverlay extends Overlay
 		mirrorClaim(owner, 3188, 3480, 3189, 3479);
 		mirrorClaim(owner, 3187, 3477, 3188, 3478);
 		mirrorClaim(owner, 3174, 3469, 3173, 3468);
+		mirrorClaim(owner, 3141, 3474, 3141, 3476); // center pocket filled from the tile 2 south
+		mirrorClaim(owner, 3141, 3479, 3141, 3477); // center pocket filled from the tile 2 north
+		mirrorClaim(owner, 3145, 3470, 3147, 3470); // center pocket filled from the tile 2 west
+		mirrorClaim(owner, 3150, 3470, 3148, 3470); // center pocket filled from the tile 2 east
 
 		// Pre-claims (the unwalkable filler pockets + the diagonal-wall gap slivers). Show Pre-Claims ON:
 		// the solid-GE look - everything shown in the GE owner's color (white when unclaimed), tagged in the

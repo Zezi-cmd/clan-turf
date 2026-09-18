@@ -184,6 +184,64 @@ interface ClanTurfStore
 		return null;
 	}
 
+	/** One opted-in player's line on a clan's daily/weekly tile leaderboard. */
+	final class LeaderboardEntry
+	{
+		final String name;
+		final long daily;
+		final long weekly;
+
+		LeaderboardEntry(String name, long daily, long weekly)
+		{
+			this.name = name;
+			this.daily = daily;
+			this.weekly = weekly;
+		}
+	}
+
+	/**
+	 * The opted-in members of {@code clan} on the daily/weekly tile leaderboard, unsorted. Only the
+	 * networked store returns anything; local play has no shared board.
+	 */
+	default List<LeaderboardEntry> getLeaderboard(String clan)
+	{
+		return Collections.emptyList();
+	}
+
+	/** Publish this player's current daily/weekly tile totals to the leaderboard (opt-in). Networked only. */
+	default void leaderboardSubmit(String name, String clan, long daily, long weekly)
+	{
+	}
+
+	/** Remove this player from the leaderboard (opt-out or clan change). Networked only. */
+	default void leaderboardOptOut(String name)
+	{
+	}
+
+	/** Force an immediate leaderboard poll (e.g. right after opting in), so the board isn't stale. */
+	default void refreshLeaderboard()
+	{
+	}
+
+	/** True once at least one leaderboard poll has completed, so the panel can say "Loading" before that
+	 *  instead of "no one has opted in." The local store has no board, so it is trivially ready. */
+	default boolean leaderboardReady()
+	{
+		return true;
+	}
+
+	/** The player who topped a clan's board for the just-ended day, or null if unknown. Networked store only. */
+	default String leaderboardDayWinner(String clan)
+	{
+		return null;
+	}
+
+	/** The player who topped a clan's board for the just-ended week, or null if unknown. Networked store only. */
+	default String leaderboardWeekWinner(String clan)
+	{
+		return null;
+	}
+
 	/** Start any background work (e.g. the sync poller). No-op for the local store. */
 	default void start()
 	{

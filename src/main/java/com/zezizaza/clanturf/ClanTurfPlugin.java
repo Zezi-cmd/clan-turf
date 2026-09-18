@@ -55,6 +55,8 @@ import net.runelite.api.Player;
 import net.runelite.api.clan.ClanChannel;
 import net.runelite.api.clan.ClanChannelMember;
 import net.runelite.api.clan.ClanRank;
+import net.runelite.api.clan.ClanSettings;
+import net.runelite.api.clan.ClanTitle;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
@@ -63,6 +65,7 @@ import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.game.ChatIconManager;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.OverlayMenuClicked;
@@ -90,6 +93,7 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ClientToolbar clientToolbar;
 	@Inject private ColorPickerManager colorPickerManager;
 	@Inject private SpriteManager spriteManager;
+	@Inject private ChatIconManager chatIconManager;
 	@Inject private ConfigManager configManager;
 	@Inject private ClanTurfConfig config;
 	@Inject private ClanTurfOverlay overlay;
@@ -292,13 +296,15 @@ public class ClanTurfPlugin extends Plugin
 	private static final String UPDATE_ID = "v3";
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
-	private static final boolean ALWAYS_SHOW_UPDATE = true;
+	private static final boolean ALWAYS_SHOW_UPDATE = false;
 	/** Header label. Kept as "[Update]" for now. Set to null in a future release to auto-use the
 	 *  Hub-built jar version instead (see updateMessage()). */
 	private static final String UPDATE_LABEL = "[Update]";
 	private static final String[] UPDATE_LINES = {
 		"New: Alliance player indicators. Your alliance's symbol can float over allied players' heads so you can tell friend from foe anywhere.",
-		"Turn on Show player indicators in the Alliances settings to see players from other clans. It opts you in: your name and alliance join a public roster, never your location, and you are removed the moment you turn it back off.",
+		"Turn on Show player indicators in the Opt-In Features settings to see players from other clans. It opts you in: your name and alliance join a public roster, never your location, and you are removed the moment you turn it back off.",
+		"New: Clan leaderboards. Track your daily and weekly Grand Exchange tiles in the side panel, and turn on Clan leaderboard (also under Opt-In Features) to rank your clan for events.",
+		"The leaderboard is opt-in too: only your name, clan, and tile counts are shared, and turning it off removes you.",
 	};
 
 	/** Set when we log in with an unseen update; the changelog fires on the next game tick, since chat
@@ -326,6 +332,17 @@ public class ClanTurfPlugin extends Plugin
 	private int cachedRate;
 	private long rateCalcMs;
 	private int maxRate;
+
+	/** Leaderboard tile counters: persistent daily/weekly totals (separate from the session tracker above),
+	 * with the UTC day and Monday-week they belong to so they roll over to 0 on their own at the boundary. */
+	private int lbDaily;
+	private int lbWeekly;
+	private int lbDay;
+	private int lbWeek;
+	private boolean lbLoaded;
+	private long lastLbPushMs;
+	private String lbOptedInName; // display name currently published to the leaderboard, else null
+	private static final long LB_PUSH_THROTTLE_MS = 15000; // at most one leaderboard submit per 15s
 
 	/** Daily turf reset (matches the server's default CLANTURF_RESET_HOUR). */
 	private static final int RESET_HOUR_UTC = 0;
@@ -558,10 +575,15 @@ public class ClanTurfPlugin extends Plugin
 			applyWhitelist(); // switching online/offline changes whether the offline color list applies
 			refreshClaims();
 			syncRosterMembership(); // going online/offline changes whether we can publish the opt-in row
+			syncLeaderboardMembership(); // ...same for the leaderboard opt-in
 		}
 		else if ("showPlayerIndicators".equals(key))
 		{
 			syncRosterMembership(); // toggled the opt-in: add or remove this player's roster row
+		}
+		else if ("leaderboardOptIn".equals(key))
+		{
+			syncLeaderboardMembership(); // toggled the opt-in: publish or remove this player's leaderboard row
 		}
 		// Recolor live when the custom-color toggle or either color list changes.
 		else if ("customClanColor".equals(key) || "clanColorWhitelist".equals(key)
@@ -858,6 +880,9 @@ public class ClanTurfPlugin extends Plugin
 		// switching clans, the clan changing alliance, or a disband all refresh what shows over your head.
 		syncRosterMembership();
 
+		// Keep the leaderboard fresh while opted in (self-throttled push, rolls the totals at midnight).
+		tickLeaderboard();
+
 		// Keep the paint-as roster's "your clan" entry current as the clan channel loads or changes, and
 		// remember the name so it shows instantly next login instead of waiting for the channel.
 		String realClanNow = effectiveClanName();
@@ -938,6 +963,7 @@ public class ClanTurfPlugin extends Plugin
 						clanHintDue(), perClanTileCounts());
 				panel.updateBattles(battlesForPanel(), displayClan(effectiveClanName()), client.getWorld());
 				panel.setGlobalClaims(store.getGlobalClaims());
+				pushLeaderboardToPanel();
 			}
 		}
 
@@ -1178,7 +1204,178 @@ public class ClanTurfPlugin extends Plugin
 			{
 				firstClaimMs = System.currentTimeMillis();
 			}
+			recordLeaderboardTile();
 		}
+	}
+
+	// ---- leaderboard tile counters -------------------------------------------------
+
+	/** UTC calendar day as an epoch-day, matching the server's daily stamp. */
+	private static int utcDay()
+	{
+		return (int) java.time.LocalDate.now(java.time.ZoneOffset.UTC).toEpochDay();
+	}
+
+	/** Epoch-day of the Monday starting the current UTC week, matching the server's weekly stamp. */
+	private static int utcWeek()
+	{
+		return (int) java.time.LocalDate.now(java.time.ZoneOffset.UTC)
+				.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+				.toEpochDay();
+	}
+
+	/** Load the persisted counters once into memory, then keep them current there. */
+	private void ensureLeaderboardLoaded()
+	{
+		if (lbLoaded)
+		{
+			return;
+		}
+		lbDaily = config.lbDailyTiles();
+		lbWeekly = config.lbWeeklyTiles();
+		lbDay = config.lbDay();
+		lbWeek = config.lbWeek();
+		lbLoaded = true;
+		rollLeaderboardPeriods();
+	}
+
+	/** Zero the daily total on a new UTC day and the weekly total on a new Monday, persisting any change. */
+	private void rollLeaderboardPeriods()
+	{
+		int today = utcDay();
+		int week = utcWeek();
+		boolean changed = false;
+		if (lbDay != today)
+		{
+			lbDaily = 0;
+			lbDay = today;
+			changed = true;
+		}
+		if (lbWeek != week)
+		{
+			lbWeekly = 0;
+			lbWeek = week;
+			changed = true;
+		}
+		if (changed)
+		{
+			persistLeaderboardCounters();
+		}
+	}
+
+	/** Count one genuine claim toward the daily and weekly totals, persist, and push if opted in. */
+	private void recordLeaderboardTile()
+	{
+		ensureLeaderboardLoaded();
+		rollLeaderboardPeriods();
+		lbDaily++;
+		lbWeekly++;
+		persistLeaderboardCounters();
+		pushLeaderboardIfOptedIn();
+	}
+
+	private void persistLeaderboardCounters()
+	{
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbDailyTiles", lbDaily);
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbWeeklyTiles", lbWeekly);
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbDay", lbDay);
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbWeek", lbWeek);
+	}
+
+	/** Today's tile total, rolled over if the day changed since the last claim. */
+	int getLeaderboardDaily()
+	{
+		ensureLeaderboardLoaded();
+		rollLeaderboardPeriods();
+		return lbDaily;
+	}
+
+	/** This week's tile total, rolled over if the week changed since the last claim. */
+	int getLeaderboardWeekly()
+	{
+		ensureLeaderboardLoaded();
+		rollLeaderboardPeriods();
+		return lbWeekly;
+	}
+
+	/** Publish the current totals to the leaderboard, throttled, but only while opted in and online. */
+	private void pushLeaderboardIfOptedIn()
+	{
+		if (!config.leaderboardOptIn() || !config.useServer())
+		{
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (now - lastLbPushMs < LB_PUSH_THROTTLE_MS)
+		{
+			return;
+		}
+		String clan = effectiveClanName();
+		Player me = client.getLocalPlayer();
+		if (clan == null || me == null || me.getName() == null)
+		{
+			return;
+		}
+		lastLbPushMs = now;
+		store.leaderboardSubmit(me.getName(), clan, lbDaily, lbWeekly);
+	}
+
+	/** Opt in/out of the leaderboard when the toggle (or online state) changes: a forced push + refresh on
+	 *  opt-in, a remove on opt-out. Called from onConfigChanged, not per tick, so it doesn't spam. */
+	private void syncLeaderboardMembership()
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		Player local = client.getLocalPlayer();
+		String name = local == null ? null : local.getName();
+		if (name == null || name.isEmpty())
+		{
+			return;
+		}
+		boolean wantOptIn = config.leaderboardOptIn() && config.useServer();
+		String clan = wantOptIn ? effectiveClanName() : null;
+		if (wantOptIn && clan != null)
+		{
+			ensureLeaderboardLoaded();
+			rollLeaderboardPeriods();
+			lastLbPushMs = 0L; // let this push through the throttle
+			pushLeaderboardIfOptedIn();
+			serverStore.refreshLeaderboard();
+			lbOptedInName = name;
+		}
+		else
+		{
+			// Not opting in (or no clan): remove our row. Sent even if we opted in a previous session
+			// (lbOptedInName isn't persisted), so unchecking the box always removes us server-side.
+			lbOptedInName = null;
+			serverStore.leaderboardOptOut(name);
+			serverStore.refreshLeaderboard();
+		}
+	}
+
+	/** Per-tick: keep the leaderboard fresh while opted in (self-throttled push, midnight rollover). */
+	private void tickLeaderboard()
+	{
+		if (store != serverStore || !config.leaderboardOptIn())
+		{
+			return;
+		}
+		ensureLeaderboardLoaded();
+		rollLeaderboardPeriods();
+		pushLeaderboardIfOptedIn();
+	}
+
+	/** The opted-in members of your clan on the leaderboard (empty if you have no clan or aren't networked). */
+	java.util.List<ClanTurfStore.LeaderboardEntry> getClanLeaderboard()
+	{
+		String clan = effectiveClanName();
+		if (clan == null)
+		{
+			return java.util.Collections.emptyList();
+		}
+		return store.getLeaderboard(clan);
 	}
 
 	/** Claims made this session, retakes included (for the tiles/hour tracker overlay). */
@@ -2562,6 +2759,63 @@ public class ClanTurfPlugin extends Plugin
 				perClanTileCounts());
 		panel.updateBattles(battlesForPanel(), displayClan(effectiveClanName()), client.getWorld());
 		panel.setGlobalClaims(store.getGlobalClaims());
+		pushLeaderboardToPanel();
+	}
+
+	/** Feed the panel's Leaderboards section with the personal counter and the opted-in clan board. Clan
+	 *  rank icons are resolved here on the game thread (they read the clan channel) and passed as ready
+	 *  images, so the Swing panel never touches the client. */
+	private void pushLeaderboardToPanel()
+	{
+		if (panel == null)
+		{
+			return;
+		}
+		Player me = client.getLocalPlayer();
+		String myName = me == null ? null : me.getName();
+		java.util.List<ClanTurfStore.LeaderboardEntry> board = getClanLeaderboard();
+		java.util.Map<String, javax.swing.Icon> icons = new java.util.HashMap<>();
+		ClanChannel ch = client.getClanChannel();
+		ClanSettings cs = client.getClanSettings();
+		if (ch != null && cs != null)
+		{
+			for (ClanTurfStore.LeaderboardEntry e : board)
+			{
+				javax.swing.Icon ic = rankIcon(ch, cs, e.name);
+				if (ic != null)
+				{
+					icons.put(e.name, ic);
+				}
+			}
+		}
+		// The board and winners are keyed by your real clan (not the alliance), so use the raw clan name
+		// here - displayClan() would collapse it to the alliance name like the scoreboard does.
+		String clan = effectiveClanName();
+		panel.updateLeaderboard(getLeaderboardDaily(), getLeaderboardWeekly(), config.leaderboardOptIn(),
+				store == serverStore, board, myName, store.leaderboardReady(), icons,
+				clan == null ? "" : clan, store.leaderboardDayWinner(clan), store.leaderboardWeekWinner(clan));
+	}
+
+	/** The clan-rank icon for a member of your clan (null if they aren't in your loaded clan channel or the
+	 *  rank images haven't loaded yet - the icon then just appears on a later refresh). */
+	private javax.swing.Icon rankIcon(ClanChannel ch, ClanSettings cs, String name)
+	{
+		if (name == null)
+		{
+			return null;
+		}
+		ClanChannelMember m = ch.findMember(name);
+		if (m == null)
+		{
+			return null;
+		}
+		ClanTitle title = cs.titleForRank(m.getRank());
+		if (title == null)
+		{
+			return null;
+		}
+		java.awt.image.BufferedImage img = chatIconManager.getRankImage(title);
+		return img == null ? null : new javax.swing.ImageIcon(img);
 	}
 
 	/** Committed (debounced) leading clan, for the boundary's resting color. Null = none. */

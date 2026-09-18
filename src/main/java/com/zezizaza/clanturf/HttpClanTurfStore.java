@@ -68,6 +68,7 @@ class HttpClanTurfStore implements ClanTurfStore
 	private static final long BATTLES_POLL_MS = 15000; // the active-battles board updates slowly
 	private static final long ALLIANCES_POLL_MS = 20000; // alliances change rarely, so poll gently
 	private static final long ROSTER_POLL_MS = 20000; // opt-in overhead-indicator roster, changes rarely
+	private static final long LEADERBOARD_POLL_MS = 30000; // opt-in tile leaderboard, changes slowly
 	private static final long CONNECT_GRACE_MS = 30000; // cold-start window before we call it down
 	private static final long STALE_MS = 45000; // no reply for this long = treat the server as down
 
@@ -94,6 +95,10 @@ class HttpClanTurfStore implements ClanTurfStore
 
 	// Opt-in overhead-indicator roster from /roster: standardized player name(lower) -> allianceId.
 	private volatile Map<String, String> roster = Collections.emptyMap();
+	private volatile Map<String, List<LeaderboardEntry>> leaderboardByClan = Collections.emptyMap(); // clan(lc) -> entries
+	private volatile Map<String, String> dayWinnerByClan = Collections.emptyMap();  // clan(lc) -> yesterday's winner
+	private volatile Map<String, String> weekWinnerByClan = Collections.emptyMap(); // clan(lc) -> last week's winner
+	private volatile boolean leaderboardLoaded; // true after the first successful /leaderboard poll
 
 	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
 	private volatile long startedMs;
@@ -136,6 +141,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		exec.scheduleWithFixedDelay(this::pollBattles, 0, BATTLES_POLL_MS, TimeUnit.MILLISECONDS);
 		exec.scheduleWithFixedDelay(this::pollAlliances, 0, ALLIANCES_POLL_MS, TimeUnit.MILLISECONDS);
 		exec.scheduleWithFixedDelay(this::pollRoster, 0, ROSTER_POLL_MS, TimeUnit.MILLISECONDS);
+		exec.scheduleWithFixedDelay(this::pollLeaderboard, 0, LEADERBOARD_POLL_MS, TimeUnit.MILLISECONDS);
 		log.info("ClanTurf sync store started against {}", baseUrl);
 	}
 
@@ -508,6 +514,129 @@ class HttpClanTurfStore implements ClanTurfStore
 			}
 		}
 		roster = next;
+	}
+
+	private void pollLeaderboard()
+	{
+		if (!online)
+		{
+			return;
+		}
+		String body = send("GET", "/leaderboard", null);
+		if (body == null)
+		{
+			return;
+		}
+		Map<String, List<LeaderboardEntry>> next = new HashMap<>();
+		Map<String, String> nextDay = new HashMap<>();
+		Map<String, String> nextWeek = new HashMap<>();
+		for (String line : body.split("\n"))
+		{
+			if (line.isBlank())
+			{
+				continue;
+			}
+			if (line.startsWith("L,"))
+			{
+				String[] f = line.split(",", 5); // L,daily,weekly,name,clan
+				if (f.length >= 5)
+				{
+					try
+					{
+						long daily = Long.parseLong(f[1].trim());
+						long weekly = Long.parseLong(f[2].trim());
+						next.computeIfAbsent(f[4].toLowerCase(), k -> new ArrayList<>())
+								.add(new LeaderboardEntry(f[3], daily, weekly));
+					}
+					catch (NumberFormatException ignored)
+					{
+						// skip a malformed line
+					}
+				}
+			}
+			else if (line.startsWith("WD,"))
+			{
+				String[] f = line.split(",", 3); // WD,name,clan
+				if (f.length >= 3)
+				{
+					nextDay.put(f[2].toLowerCase(), f[1]);
+				}
+			}
+			else if (line.startsWith("WW,"))
+			{
+				String[] f = line.split(",", 3); // WW,name,clan
+				if (f.length >= 3)
+				{
+					nextWeek.put(f[2].toLowerCase(), f[1]);
+				}
+			}
+		}
+		leaderboardByClan = next;
+		dayWinnerByClan = nextDay;
+		weekWinnerByClan = nextWeek;
+		leaderboardLoaded = true;
+	}
+
+	@Override
+	public String leaderboardDayWinner(String clan)
+	{
+		return clan == null ? null : dayWinnerByClan.get(clan.toLowerCase());
+	}
+
+	@Override
+	public String leaderboardWeekWinner(String clan)
+	{
+		return clan == null ? null : weekWinnerByClan.get(clan.toLowerCase());
+	}
+
+	@Override
+	public boolean leaderboardReady()
+	{
+		return leaderboardLoaded;
+	}
+
+	@Override
+	public List<LeaderboardEntry> getLeaderboard(String clan)
+	{
+		if (clan == null)
+		{
+			return Collections.emptyList();
+		}
+		List<LeaderboardEntry> l = leaderboardByClan.get(clan.toLowerCase());
+		return l == null ? Collections.emptyList() : l;
+	}
+
+	@Override
+	public void leaderboardSubmit(String name, String clan, long daily, long weekly)
+	{
+		ScheduledExecutorService e = exec;
+		if (e == null || name == null || clan == null)
+		{
+			return;
+		}
+		e.execute(() -> sendResult("POST", "/leaderboard/submit",
+				form("name", name, "clan", clan, "daily", Long.toString(daily), "weekly", Long.toString(weekly))));
+	}
+
+	@Override
+	public void leaderboardOptOut(String name)
+	{
+		ScheduledExecutorService e = exec;
+		if (e == null || name == null)
+		{
+			return;
+		}
+		e.execute(() -> sendResult("POST", "/leaderboard/optout", form("name", name)));
+	}
+
+	@Override
+	public void refreshLeaderboard()
+	{
+		ScheduledExecutorService e = exec;
+		if (e != null)
+		{
+			e.execute(this::pollLeaderboard);
+		}
 	}
 
 	@Override

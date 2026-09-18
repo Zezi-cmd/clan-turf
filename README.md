@@ -82,13 +82,19 @@ The alliance symbol shows everywhere the alliance does: large above the name on 
 
 Turn on **Show player indicators** in the settings and the alliance's symbol, in the alliance color, floats over the heads of alliance members around you, so in a crowded fight you can pick out who is on your side and who is not at a glance. Your own clanmates are tagged automatically from local data. To see players from *other* clans in your alliance, both of you need this turned on: switching it on opts you in, adding your name and alliance to a public roster that everyone running Clan Turf can read, so opted-in players can be shown over each other's heads. Only your name and alliance are ever shared, never your location, and you are removed from the roster shortly after you turn it back off.
 
-By default the symbols show only while you are at the Grand Exchange and fade out as you leave (**Hide indicators outside GE** controls that). **Show names** adds the player's name under the symbol, skipping anyone the Player Indicators plugin or your own friends, clan, or team already name so nothing doubles up, and **Indicator opacity** sets how strong the symbol looks. All four live in the **Alliances** settings section.
+By default the symbols show only while you are at the Grand Exchange and fade out as you leave (**Hide indicators outside GE** controls that). **Show names** adds the player's name under the symbol, skipping anyone the Player Indicators plugin or your own friends, clan, or team already name so nothing doubles up, and **Indicator opacity** sets how strong the symbol looks. The opt-in **Show player indicators** toggle lives in the **Opt-In Features** settings section; those three display options sit under **Alliances**.
 
 ![Alliance player indicator](images/allianceplayerindicator.png) ![Alliance player indicator](images/allianceplayerindicator2.png)
 
 ## Rally your clan in chat
 
 Type `!defend 307` or `!invade 420` in clan chat (`!def` and `!inv` also work) to send a formatted rally call in the target clan's color. Commands are validated against the live board so only real targets are announced.
+
+## Leaderboards
+
+Track how many Grand Exchange tiles you claim each day and week, and rank your clan for internal events. Your own daily and weekly counters live in the side panel's Leaderboards section, run locally, and reset on their own at 00:00 UTC (daily) and Monday 00:00 UTC (weekly).
+
+Opt in to the **Clan leaderboard** in the Opt-In Features settings and your totals join a board every opted-in clanmate can see, sortable by daily or weekly total like the Active Battles list. Only opted-in players appear, only your name, clan, and tile counts are sent (never your location), and turning it off removes you. Your personal counter shows whether or not you opt in.
 
 ## Community Claims
 
@@ -167,18 +173,22 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 
 ![Clan settings](images/configclan.png)
 
-### Blocked allies
+### Opt-In Features
 
-- **Blocked clans** - Clan names, comma-separated, barred from joining your alliance (only applies while your clan owns one). The kick x in the Alliance panel adds a name here; remove one to un-block that clan.
+Opt-in extras that share a little extra data. Each toggle's description spells out exactly what it sends, and you can go Offline at any time to stop entirely.
+
+- **Show player indicators** - Off by default. Float the alliance symbol, in the alliance color, over alliance members' heads so you can spot allies and rivals. Turning it on opts you in: your name and alliance are added to a public roster everyone running Clan Turf can read, so others can see your symbol. Only your name and alliance are sent, never your location, and you're removed shortly after you turn it off.
+- **Clan leaderboard** - Off by default. Join your clan's daily and weekly tile leaderboard for internal events. Turning it on opts you in: your name, clan, and daily/weekly tile counts are sent so opted-in clanmates can see the board. Only opted-in players appear. Turn it off to be removed. Your own tile counter shows either way.
 
 ### Alliances
 
-- **Show player indicators** - Off by default. Float the alliance symbol, in the alliance color, over alliance members' heads so you can spot allies and rivals. Turning it on opts you in: your name and alliance are added to a public roster everyone running Clan Turf can read, so others can see your symbol. Only your name and alliance are sent, never your location, and you're removed shortly after you turn it off.
 - **Show names** - On by default. Also draw the player's name under the symbol, skipping anyone Player Indicators or your own friends, clan, or team already name so names never double up.
 - **Hide indicators outside GE** - On by default. Only show the symbols at the Grand Exchange; they fade out as you leave. Local only.
 - **Indicator opacity** - Max opacity of the overhead alliance symbol and name (0 = invisible, 100 = full).
 
-![Alliances settings](images/configallianceunchecked.png) ![Alliances settings with indicators on](images/configalliancechecked.png)
+### Blocked allies
+
+- **Blocked clans** - Clan names, comma-separated, barred from joining your alliance (only applies while your clan owns one). The kick x in the Alliance panel adds a name here; remove one to un-block that clan.
 
 ### Network
 
@@ -200,5 +210,5 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 
 - **Turf is per clan and per world.** You need to be in a clan to claim anything, and each world's Grand Exchange is its own separate battleground.
 - **For the best look, pair it with [Improved Tile Indicators](https://runelite.net/plugin-hub/show/improved-tile-indicators).** Enable **Draw overlays below player** and **Draw overlays below NPCs**, then add the GE NPCs to **NPCs to draw on top**. Pets can be set to **Draw below** via shift + right-click.
-- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, symbol, and passcode you enter. If you turn on **Show player indicators**, it additionally sends your player display name paired with your alliance, so opted-in players can be shown over each other's heads. This is opt-in, is removed shortly after you turn it off, and never includes your location. No account details, passwords, or location tracking are sent. Syncing pauses when you log out.
+- **What gets sent to the server.** With sync enabled, Clan Turf sends your clan name, claimed GE tile coordinates, and current world number. If you create or join an alliance, it also sends the alliance name, color, symbol, and passcode you enter. If you turn on **Show player indicators**, it additionally sends your player display name paired with your alliance, so opted-in players can be shown over each other's heads. This is opt-in, is removed shortly after you turn it off, and never includes your location. If you turn on the **Clan leaderboard**, it additionally sends your display name, clan, and daily/weekly tile counts so your clan's opted-in board can be shown - also opt-in, removed when you turn it off, and never your location. No account details, passwords, or location tracking are sent. Syncing pauses when you log out.
 - **No automation.** Clan Turf reads your position and draws overlays. Clan chat commands only read clan messages and display local formatted text. It never moves your character, sends chat, or performs automated game actions.

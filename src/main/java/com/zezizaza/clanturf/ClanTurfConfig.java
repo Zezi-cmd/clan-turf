@@ -55,12 +55,12 @@ public interface ClanTurfConfig extends Config
 	String clanSection = "clanSection";
 
 	@ConfigSection(
-			name = "Blocked allies",
-			description = "Clans blocked from joining your alliance. Edit the list like the color lists.",
-			position = 3,
-			closedByDefault = true
+			name = "Opt-In Features",
+			description = "Opt-in extras that share a little extra data. Each toggle spells out exactly what it "
+					+ "sends when you turn it on, and you can go Offline at any time to stop entirely.",
+			position = 3
 	)
-	String blockedAlliesSection = "blockedAlliesSection";
+	String optionalFeaturesSection = "optionalFeaturesSection";
 
 	@ConfigSection(
 			name = "Alliances",
@@ -70,16 +70,24 @@ public interface ClanTurfConfig extends Config
 	String alliancesSection = "alliancesSection";
 
 	@ConfigSection(
+			name = "Blocked allies",
+			description = "Clans blocked from joining your alliance. Edit the list like the color lists.",
+			position = 5,
+			closedByDefault = true
+	)
+	String blockedAlliesSection = "blockedAlliesSection";
+
+	@ConfigSection(
 			name = "Network",
 			description = "The sync server that makes rival clans visible to each other.",
-			position = 5
+			position = 6
 	)
 	String networkSection = "networkSection";
 
 	@ConfigSection(
 			name = "Extras",
 			description = "Reset countdown and the tiles-per-hour tracker.",
-			position = 6
+			position = 7
 	)
 	String extrasSection = "extrasSection";
 
@@ -372,7 +380,7 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "showPlayerIndicators",
-			section = alliancesSection,
+			section = optionalFeaturesSection,
 			name = "Show player indicators",
 			description = "Float the alliance symbol, in the alliance color, over players' heads so you can spot "
 					+ "allies and rivals. This OPTS YOU IN: your name is added to a public roster so others can "
@@ -381,6 +389,21 @@ public interface ClanTurfConfig extends Config
 			position = 0
 	)
 	default boolean showPlayerIndicators()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+			keyName = "leaderboardOptIn",
+			section = optionalFeaturesSection,
+			name = "Clan leaderboard",
+			description = "Join your clan's daily and weekly tile leaderboard so clanmates can run events. This "
+					+ "OPTS YOU IN: your name, your clan, and your daily and weekly tile counts are sent to the "
+					+ "server so opted-in clanmates can see the board. Only opted-in players appear on it. Turn it "
+					+ "off to be removed. Your own tile counter shows either way, opted in or not.",
+			position = 1
+	)
+	default boolean leaderboardOptIn()
 	{
 		return false;
 	}
@@ -748,6 +771,32 @@ public interface ClanTurfConfig extends Config
 	default String lastClan()
 	{
 		return "";
+	}
+
+	// Leaderboard tile counters: persisted so daily/weekly totals survive relogs and world hops. The
+	// day/week stamps (UTC epoch-day, and epoch-day of that week's Monday) drive the local rollover reset.
+	@ConfigItem(keyName = "lbDailyTiles", name = "", description = "", position = 140, hidden = true)
+	default int lbDailyTiles()
+	{
+		return 0;
+	}
+
+	@ConfigItem(keyName = "lbWeeklyTiles", name = "", description = "", position = 141, hidden = true)
+	default int lbWeeklyTiles()
+	{
+		return 0;
+	}
+
+	@ConfigItem(keyName = "lbDay", name = "", description = "", position = 142, hidden = true)
+	default int lbDay()
+	{
+		return 0;
+	}
+
+	@ConfigItem(keyName = "lbWeek", name = "", description = "", position = 143, hidden = true)
+	default int lbWeek()
+	{
+		return 0;
 	}
 
 	@ConfigItem(keyName = "lastUpdateSeen", name = "", description = "",

@@ -210,6 +210,28 @@ class ClanTurfPanel extends PluginPanel
 	private long stakeClaimed;
 	private int stakeTotal;
 
+	// "Leaderboards": your own persistent daily/weekly tile counter (always shown online), plus the opted-in
+	// clan board sortable by daily or weekly total. Server-mode only.
+	private final JLabel leaderboardHeader = new JLabel("Leaderboards");
+	private final JPanel leaderboardBox = new JPanel();
+	private boolean leaderboardCollapsed = true; // starts collapsed; only "Your tiles" shows until expanded
+	private boolean leaderboardOnline = false;
+
+	private enum LbSort { DAILY, WEEKLY }
+
+	private LbSort lbSort = LbSort.DAILY;
+	private int lbDaily;
+	private int lbWeekly;
+	private boolean lbOptedIn;
+	private String lbMyName;
+	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoard = java.util.Collections.emptyList();
+	private String lastLbSig = ""; // skip the rebuild (and its flicker) when nothing displayed has changed
+	private boolean lbReady; // true once the first board poll has completed (else show "Loading")
+	private java.util.Map<String, javax.swing.Icon> lbRankIcons = java.util.Collections.emptyMap(); // name -> rank icon
+	private String lbClanName = ""; // your clan, shown above the board
+	private String lbDayWinner = ""; // yesterday's top player for your clan (server-tracked), else blank
+	private String lbWeekWinner = ""; // last week's top player for your clan, else blank
+
 	// "Community Claims": the all-time community counter, shown only in server mode, with a count-up
 	// animation each time the total ticks up.
 	private final FadePanel globalBox = new FadePanel();
@@ -464,8 +486,11 @@ class ClanTurfPanel extends PluginPanel
 		top.add(battlesHeader);
 		top.add(battlesBox);
 		buildAllianceSection();
+		buildLeaderboardSection();
 		top.add(allianceHeader);
 		top.add(allianceBody);
+		top.add(leaderboardHeader);
+		top.add(leaderboardBox);
 		top.add(globalHeader);
 		top.add(globalBox);
 
@@ -572,7 +597,7 @@ class ClanTurfPanel extends PluginPanel
 		top.add(sandboxBox);
 
 		// Report sits at the very bottom in both modes (below the offline tools when they're shown).
-		top.add(Box.createVerticalStrut(10));
+		top.add(Box.createVerticalStrut(20));
 		top.add(reportBox);
 
 		add(top, BorderLayout.NORTH);
@@ -1646,6 +1671,278 @@ class ClanTurfPanel extends PluginPanel
 		globalIntro.setVisible(globalHasData && !globalCollapsed);
 		globalSub.setVisible(globalHasData && !globalCollapsed);
 		globalHeader.setText("Community Claims" + (globalCollapsed ? "  ▸" : "  ▾"));
+	}
+
+	/** Builds the collapsible Leaderboards section (personal counter + opted-in clan board). Server-only;
+	 *  hidden until {@link #updateLeaderboard} runs with online = true. */
+	private void buildLeaderboardSection()
+	{
+		leaderboardHeader.setFont(HEADER_FONT);
+		leaderboardHeader.setForeground(ColorScheme.BRAND_ORANGE);
+		leaderboardHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+		leaderboardHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+		leaderboardHeader.setToolTipText("Your daily and weekly tiles, and your clan's opted-in board.");
+		leaderboardHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		leaderboardHeader.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				leaderboardCollapsed = !leaderboardCollapsed;
+				renderLeaderboard();
+				revalidate();
+				repaint();
+			}
+		});
+		leaderboardBox.setLayout(new BoxLayout(leaderboardBox, BoxLayout.Y_AXIS));
+		leaderboardBox.setOpaque(false);
+		leaderboardBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+		leaderboardBox.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+		leaderboardHeader.setVisible(false);
+		leaderboardBox.setVisible(false);
+	}
+
+	/**
+	 * Feed the Leaderboards section: your persistent daily/weekly totals, whether you're opted in, whether
+	 * we're online (the section is server-only), your clan's opted-in board, and your own name to bold your
+	 * row. Rebuilds the section.
+	 */
+	void updateLeaderboard(int daily, int weekly, boolean optedIn, boolean online,
+			java.util.List<ClanTurfStore.LeaderboardEntry> board, String myName, boolean ready,
+			java.util.Map<String, javax.swing.Icon> rankIcons, String clanName, String dayWinner, String weekWinner)
+	{
+		lbDaily = daily;
+		lbWeekly = weekly;
+		lbOptedIn = optedIn;
+		leaderboardOnline = online;
+		lbBoard = board == null ? java.util.Collections.emptyList() : board;
+		lbMyName = myName;
+		lbReady = ready;
+		lbRankIcons = rankIcons == null ? java.util.Collections.emptyMap() : rankIcons;
+		lbClanName = clanName == null ? "" : clanName;
+		lbDayWinner = dayWinner == null ? "" : dayWinner;
+		lbWeekWinner = weekWinner == null ? "" : weekWinner;
+		renderLeaderboard();
+	}
+
+	private void renderLeaderboard()
+	{
+		// Deterministic order (active period desc, then name) so an identical board from a differently-ordered
+		// poll produces the same signature and we skip the rebuild - otherwise the section flickers each poll.
+		java.util.List<ClanTurfStore.LeaderboardEntry> sorted = new ArrayList<>(lbBoard);
+		sorted.sort(java.util.Comparator
+				.comparingLong((ClanTurfStore.LeaderboardEntry e) -> lbSort == LbSort.WEEKLY ? e.weekly : e.daily)
+				.reversed()
+				.thenComparing(e -> e.name == null ? "" : e.name.toLowerCase()));
+
+		StringBuilder sig = new StringBuilder();
+		sig.append(leaderboardOnline).append('|').append(leaderboardCollapsed).append('|').append(lbSort)
+				.append('|').append(lbDaily).append('|').append(lbWeekly).append('|').append(lbOptedIn)
+				.append('|').append(lbReady).append('|').append(lbMyName).append('|').append(lbClanName)
+				.append('|').append(lbDayWinner).append('|').append(lbWeekWinner);
+		for (ClanTurfStore.LeaderboardEntry e : sorted)
+		{
+			sig.append('#').append(e.name).append(':').append(e.daily).append(':').append(e.weekly)
+					.append(lbRankIcons.containsKey(e.name) ? 'I' : '-');
+		}
+		String s = sig.toString();
+		if (s.equals(lastLbSig))
+		{
+			return; // nothing displayed changed - leave the components in place, no flicker
+		}
+		lastLbSig = s;
+
+		leaderboardHeader.setVisible(leaderboardOnline);
+		leaderboardBox.setVisible(leaderboardOnline); // box stays visible online; collapse hides only the board part
+		leaderboardHeader.setText("Leaderboards" + (leaderboardCollapsed ? "  ▸" : "  ▾"));
+		leaderboardBox.removeAll();
+		if (!leaderboardOnline)
+		{
+			leaderboardBox.revalidate();
+			leaderboardBox.repaint();
+			return;
+		}
+
+		// Your own counter - always shown, even when the section is collapsed (like Community Claims).
+		String gray = hex(ColorScheme.LIGHT_GRAY_COLOR);
+		JLabel mine = new JLabel("<html><body style='width:170px'>Your tiles<br>"
+				+ "<span style='color:#" + gray + "'>Today: </span><b>" + lbDaily + "</b><br>"
+				+ "<span style='color:#" + gray + "'>This week: </span><b>" + lbWeekly + "</b></body></html>");
+		mine.setFont(FontManager.getRunescapeFont());
+		mine.setForeground(Color.WHITE);
+		mine.setAlignmentX(Component.LEFT_ALIGNMENT);
+		mine.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+		leaderboardBox.add(mine);
+
+		if (leaderboardCollapsed)
+		{
+			leaderboardBox.revalidate();
+			leaderboardBox.repaint();
+			return; // collapsed: only your personal line shows; the sort bar and board are hidden
+		}
+
+		// A divider sets your personal counter apart from the clan board below.
+		leaderboardBox.add(Box.createVerticalStrut(6));
+		leaderboardBox.add(thinDivider());
+		leaderboardBox.add(Box.createVerticalStrut(6));
+
+		// The clan board is gated behind opting in: you have to be on the board to view it.
+		if (!lbOptedIn)
+		{
+			JLabel gate = new JLabel("<html><body style='width:170px'>"
+					+ "Turn on Clan leaderboard in Opt-In Features to view your clan's board.</body></html>");
+			gate.setFont(FontManager.getRunescapeSmallFont());
+			gate.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			gate.setAlignmentX(Component.LEFT_ALIGNMENT);
+			leaderboardBox.add(gate);
+			leaderboardBox.revalidate();
+			leaderboardBox.repaint();
+			return;
+		}
+
+		// "<Clan>'s Top Turfers:" (clan name and its possessive 's both in the clan color).
+		if (!lbClanName.isEmpty())
+		{
+			String clanHex = hex(ClanTurfColors.forClan(lbClanName));
+			JLabel titleLbl = new JLabel("<html><body style='width:170px'><span style='color:#" + clanHex + "'>"
+					+ escape(lbClanName) + "'s</span> Top Turfers:</body></html>");
+			titleLbl.setFont(FontManager.getRunescapeFont());
+			titleLbl.setForeground(Color.WHITE);
+			titleLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+			titleLbl.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
+			leaderboardBox.add(titleLbl);
+
+			// Previous period's winner (swaps with the Daily/Weekly sort); reads a muted "empty" until one exists.
+			String winner = lbSort == LbSort.WEEKLY ? lbWeekWinner : lbDayWinner;
+			String winnerCell = winner.isEmpty()
+					? "<span style='color:#" + gray + "'>empty</span>"
+					: escape(winner);
+			JLabel wLbl = new JLabel("<html><body style='width:170px'><span style='color:#" + gray + "'>"
+					+ "Previous: </span>" + winnerCell + "</body></html>");
+			wLbl.setFont(FontManager.getRunescapeSmallFont());
+			wLbl.setForeground(Color.WHITE);
+			wLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+			wLbl.setBorder(BorderFactory.createEmptyBorder(1, 0, 0, 0));
+			leaderboardBox.add(wLbl);
+		}
+
+		// Daily / Weekly sort control, with the active period's date pushed to the right of the same line.
+		JPanel bar = new JPanel();
+		bar.setLayout(new BoxLayout(bar, BoxLayout.X_AXIS));
+		bar.setOpaque(false);
+		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		bar.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+		bar.add(lbSortLabel("Daily", LbSort.DAILY));
+		bar.add(Box.createHorizontalStrut(12));
+		bar.add(lbSortLabel("Weekly", LbSort.WEEKLY));
+		bar.add(Box.createHorizontalGlue());
+		JLabel dateLabel = new JLabel(leaderboardDateText());
+		dateLabel.setFont(FontManager.getRunescapeSmallFont());
+		dateLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		bar.add(dateLabel);
+		leaderboardBox.add(bar);
+		leaderboardBox.add(thinDivider());
+		leaderboardBox.add(Box.createVerticalStrut(4));
+
+		if (lbBoard.isEmpty())
+		{
+			// Reached only when opted in (the not-opted-in case is gated above).
+			String msg = !lbReady ? "Loading leaderboards…" : "No one in your clan has opted in yet.";
+			JLabel none = new JLabel("<html><body style='width:170px'>" + escape(msg) + "</body></html>");
+			none.setFont(FontManager.getRunescapeSmallFont());
+			none.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			none.setAlignmentX(Component.LEFT_ALIGNMENT);
+			leaderboardBox.add(none);
+			leaderboardBox.revalidate();
+			leaderboardBox.repaint();
+			return;
+		}
+
+		int rank = 1;
+		for (ClanTurfStore.LeaderboardEntry e : sorted)
+		{
+			long v = lbSort == LbSort.WEEKLY ? e.weekly : e.daily;
+			boolean top = rank == 1; // only #1 is gold and bold; every other name is plain white
+			Color fg = top ? ColorScheme.BRAND_ORANGE : Color.WHITE;
+			java.awt.Font font = FontManager.getRunescapeSmallFont();
+			if (top)
+			{
+				font = font.deriveFont(java.awt.Font.BOLD);
+			}
+
+			JPanel row = new JPanel(new BorderLayout(4, 0));
+			row.setOpaque(false);
+			row.setAlignmentX(Component.LEFT_ALIGNMENT);
+			row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+
+			// rank number, then the clan-rank icon, then the name
+			JPanel leftGroup = new JPanel();
+			leftGroup.setLayout(new BoxLayout(leftGroup, BoxLayout.X_AXIS));
+			leftGroup.setOpaque(false);
+			JLabel num = new JLabel(rank + ". ");
+			num.setFont(font);
+			num.setForeground(fg);
+			num.setAlignmentY(Component.CENTER_ALIGNMENT);
+			leftGroup.add(num);
+			// One label carries the clan-rank icon AND the name, so Swing centers the icon to the text
+			// (a separate icon label sits low against the text's descender). Icon is null-safe here.
+			javax.swing.Icon ic = lbRankIcons.get(e.name);
+			JLabel nameL = new JLabel(e.name, ic, JLabel.LEFT);
+			nameL.setIconTextGap(3);
+			nameL.setFont(font);
+			nameL.setForeground(fg);
+			nameL.setAlignmentY(Component.CENTER_ALIGNMENT);
+			leftGroup.add(nameL);
+			row.add(leftGroup, BorderLayout.WEST);
+
+			JLabel count = new JLabel(String.valueOf(v));
+			count.setFont(font);
+			count.setForeground(fg);
+			row.add(count, BorderLayout.EAST);
+
+			row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+			leaderboardBox.add(row);
+			rank++;
+		}
+		leaderboardBox.revalidate();
+		leaderboardBox.repaint();
+	}
+
+	/** Date label for the active period: "Thu 17" for Daily, "Mon 21 - Sun 27" for the current UTC week. */
+	private String leaderboardDateText()
+	{
+		java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+		java.time.format.DateTimeFormatter f =
+				java.time.format.DateTimeFormatter.ofPattern("EEE d", java.util.Locale.ENGLISH);
+		if (lbSort == LbSort.WEEKLY)
+		{
+			java.time.LocalDate mon = today.with(
+					java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+			return mon.format(f) + " - " + mon.plusDays(6).format(f);
+		}
+		return today.format(f);
+	}
+
+	/** One clickable Daily / Weekly sort label for the clan leaderboard. */
+	private JLabel lbSortLabel(String text, LbSort key)
+	{
+		boolean active = lbSort == key;
+		JLabel l = new JLabel(active ? text + " ▾" : text);
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setForeground(active ? ColorScheme.BRAND_ORANGE : ColorScheme.LIGHT_GRAY_COLOR);
+		l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		l.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				lbSort = key;
+				renderLeaderboard();
+				revalidate();
+				repaint();
+			}
+		});
+		return l;
 	}
 
 	/** Builds the collapsible Alliance section: a create/join sub-panel and an in-alliance sub-panel. */
