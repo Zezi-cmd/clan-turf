@@ -530,7 +530,7 @@ class ClanTurfPanel extends PluginPanel
 		sandboxHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
 
 		slugBtn.setToolTipText("Act on every tile you cross, not just the one you land on (applies to "
-				+ "claiming and to Surrender). Offline only; hides the tiles/hour tracker while on.");
+				+ "claiming and to Surrender). Offline only.");
 		slugBtn.onClick(() ->
 		{
 			boolean next = !slugOn;

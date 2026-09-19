@@ -36,21 +36,24 @@ public interface ClanTurfConfig extends Config
 	@ConfigSection(
 			name = "Appearance",
 			description = "How claimed tiles, outlines, and the minimap tint look.",
-			position = 0
+			position = 0,
+			closedByDefault = true
 	)
 	String appearanceSection = "appearanceSection";
 
 	@ConfigSection(
 			name = "Takeover",
 			description = "The GE boundary, takeover effects, and takeover announcements.",
-			position = 1
+			position = 1,
+			closedByDefault = true
 	)
 	String takeoverSection = "takeoverSection";
 
 	@ConfigSection(
 			name = "Clan",
 			description = "Your clan color and clan chat rally commands.",
-			position = 2
+			position = 2,
+			closedByDefault = true
 	)
 	String clanSection = "clanSection";
 
@@ -65,17 +68,10 @@ public interface ClanTurfConfig extends Config
 	@ConfigSection(
 			name = "Alliances",
 			description = "Overhead alliance indicators - whose symbols and names to show, and where.",
-			position = 4
-	)
-	String alliancesSection = "alliancesSection";
-
-	@ConfigSection(
-			name = "Blocked allies",
-			description = "Clans blocked from joining your alliance. Edit the list like the color lists.",
-			position = 5,
+			position = 4,
 			closedByDefault = true
 	)
-	String blockedAlliesSection = "blockedAlliesSection";
+	String alliancesSection = "alliancesSection";
 
 	@ConfigSection(
 			name = "Network",
@@ -86,8 +82,9 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigSection(
 			name = "Extras",
-			description = "Reset countdown and the tiles-per-hour tracker.",
-			position = 7
+			description = "Reset countdown and colorblind options.",
+			position = 7,
+			closedByDefault = true
 	)
 	String extrasSection = "extrasSection";
 
@@ -162,7 +159,7 @@ public interface ClanTurfConfig extends Config
 			name = "Snail trail",
 			description = "Leave a fading trail in your clan color under your character as it runs across "
 					+ "the GE, including the in-between tiles you skip while running. Purely visual - the "
-					+ "tiles you actually claim, and your tiles/hour, are exactly the same as with it off.",
+					+ "tiles you actually claim are exactly the same as with it off.",
 			position = 11
 	)
 	default boolean snailTrail()
@@ -462,20 +459,6 @@ public interface ClanTurfConfig extends Config
 	}
 
 	@ConfigItem(
-			keyName = "showTileTracker",
-			section = extrasSection,
-			name = "Tiles/hour tracker",
-			description = "Show an on-screen counter of tiles you've claimed this session and your "
-					+ "tiles-per-hour rate, so you can practice your movement. Shift + right-click it "
-					+ "to reset.",
-			position = 16
-	)
-	default boolean showTileTracker()
-	{
-		return false;
-	}
-
-	@ConfigItem(
 			keyName = "colorblindMode",
 			section = extrasSection,
 			name = "Colorblind mode",
@@ -517,12 +500,12 @@ public interface ClanTurfConfig extends Config
 
 	@ConfigItem(
 			keyName = "blockedAllies",
-			section = blockedAlliesSection,
+			section = alliancesSection,
 			name = "Blocked clans",
 			description = "Clan names, comma-separated, blocked from joining your alliance. Only applies "
 					+ "while your clan owns an alliance. Add a name to block (and kick) that clan; remove one "
 					+ "to un-block it. The kick x in the Alliance side panel adds to this list.",
-			position = 20
+			position = 4
 	)
 	default String blockedAllies()
 	{

@@ -74,7 +74,7 @@ Get the passcode from whoever runs the alliance, drop it into the **Join an alli
 
 ### Running it
 
-The clan that created the alliance owns it: from the panel it can recolor the alliance, change its symbol, copy or change the passcode (click the passcode to copy it), remove a clan, or disband the whole thing. A clan that only joined gets a **Leave alliance** button instead. A removed or blocked clan is listed under the **Blocked allies** settings section and cannot rejoin until you take it back off that list. Prefer a different shade for your own eyes? Clicking your own clan's scoreboard bar to pick a local color still overrides the alliance color for your view only.
+The clan that created the alliance owns it: from the panel it can recolor the alliance, change its symbol, copy or change the passcode (click the passcode to copy it), remove a clan, or disband the whole thing. A clan that only joined gets a **Leave alliance** button instead. A removed or blocked clan is listed in the **Blocked clans** field under the Alliances settings section and cannot rejoin until you take it back off that list. Prefer a different shade for your own eyes? Clicking your own clan's scoreboard bar to pick a local color still overrides the alliance color for your view only.
 
 The alliance symbol shows everywhere the alliance does: large above the name on the world map, on its scoreboard bar, and beside its name in the panel. The passcode is just a code you make up to control who can join. It is never your RuneScape or Jagex account password, and Clan Turf will never ask for that.
 
@@ -96,6 +96,8 @@ Track how many Grand Exchange tiles you claim each day and week, and rank your c
 
 Opt in to the **Clan leaderboard** in the Opt-In Features settings and your totals join a board every opted-in clanmate can see, sortable by daily or weekly total like the Active Battles list. Only opted-in players appear, only your name, clan, and tile counts are sent (never your location), and turning it off removes you. Your personal counter shows whether or not you opt in.
 
+![Leaderboards](images/leaderboard.png)
+
 ## Community Claims
 
 At the bottom of the side panel, a running all-time counter tracks every tile claimed or stolen across every clan and world since launch. It never resets with the daily wipe. Your claims update instantly, while community claims periodically roll in.
@@ -110,18 +112,12 @@ Colorblind? A **Colorblind mode** in the settings adjusts every clan color, auto
 
 ![Colorblind](images/colorblind.png)
 
-## Tiles per hour
-
-Enable the **Tiles/hour tracker** in the settings and it shows **Tiles Claimed**, **Current TPH**, and **Max TPH** in a draggable on-screen overlay. It persists across world hops and relogs. Shift + right-click the tracker to **Reset run** or **Reset all**.
-
-![Tiles per hour](images/tph.png)
-
 ## Offline mode
 
 Flip the **Online/Offline** toggle at the top of the panel to Offline and Clan Turf runs local-only: you see just your own claims, nothing is sent, and an **Offline Tools** box opens with a little sandbox to mess around in:
 
 - **Clear all tiles** wipes the current world's local claims.
-- **Full Slug** paints every tile you cross, not just the one you land on, so you can fill areas fast (it also hides the tiles/hour tracker while on).
+- **Full Slug** paints every tile you cross, not just the one you land on, so you can fill areas fast.
 - **Surrender tiles** flips your steps into an eraser, wiping claimed tiles back to unclaimed. With Full Slug on it erases everything you cross; off, just the tiles you walk over.
 - **Claim tiles as** lets you add test clans and switch which one you're painting, so you can lay out a whole battle yourself. Recolor any clan by clicking its scoreboard bar; offline picks are saved in a separate list so they never touch your online one.
 
@@ -180,14 +176,13 @@ Opt-in extras that share a little extra data. Each toggle's description spells o
 - **Show player indicators** - Off by default. Float the alliance symbol, in the alliance color, over alliance members' heads so you can spot allies and rivals. Turning it on opts you in: your name and alliance are added to a public roster everyone running Clan Turf can read, so others can see your symbol. Only your name and alliance are sent, never your location, and you're removed shortly after you turn it off.
 - **Clan leaderboard** - Off by default. Join your clan's daily and weekly tile leaderboard for internal events. Turning it on opts you in: your name, clan, and daily/weekly tile counts are sent so opted-in clanmates can see the board. Only opted-in players appear. Turn it off to be removed. Your own tile counter shows either way.
 
+![Opt-In Features settings](images/configoptin1.png) ![Opt-In Features settings](images/configoptin2.png)
+
 ### Alliances
 
 - **Show names** - On by default. Also draw the player's name under the symbol, skipping anyone Player Indicators or your own friends, clan, or team already name so names never double up.
 - **Hide indicators outside GE** - On by default. Only show the symbols at the Grand Exchange; they fade out as you leave. Local only.
 - **Indicator opacity** - Max opacity of the overhead alliance symbol and name (0 = invisible, 100 = full).
-
-### Blocked allies
-
 - **Blocked clans** - Clan names, comma-separated, barred from joining your alliance (only applies while your clan owns one). The kick x in the Alliance panel adds a name here; remove one to un-block that clan.
 
 ### Network
@@ -200,7 +195,6 @@ Opt-in extras that share a little extra data. Each toggle's description spells o
 ### Extras
 
 - **Reset countdown** - Show the countdown and clan warnings before the daily reset.
-- **Tiles/hour tracker** - Show the tiles-claimed and TPH overlay. Shift + right-click to reset.
 - **Colorblind mode** - Daltonize all clan colors for easier separation: protanopia, deuteranopia, or tritanopia.
 - **Show update messages** - Print a short changelog in the chat box the first time you log in after the plugin updates.
 
