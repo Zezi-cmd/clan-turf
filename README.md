@@ -146,7 +146,7 @@ All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give
 - **Tint GE on world map** / **Worldmap opacity** - Shade and outline the GE on the world map in the owner's color with the clan name (works anywhere), and how strong the tint is.
 - **Show GE boundary** - Draw the GE border line on screen.
 - **Show Pre-Claims** - Off by default. On, fill every unwalkable GE pocket in the owner's color (white when unclaimed) so turf reads solid; off, a pocket fills only where a clan's claims border it. Cosmetic; never counted.
-- **Snail trail** - Leave a fading clan-colored trail behind you. Does not affect claims or TPH.
+- **Snail trail** - Leave a fading clan-colored trail behind you. Does not affect claims.
 - **Tile walls** - Toggle all raised wall effects: tile captures, takeovers, and the snail trail.
 
 ![Appearance settings](images/configappearance.png)
