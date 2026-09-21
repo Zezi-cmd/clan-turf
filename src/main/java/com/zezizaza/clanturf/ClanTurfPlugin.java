@@ -1120,7 +1120,10 @@ public class ClanTurfPlugin extends Plugin
 			return;
 		}
 
-		if (!GrandExchangeArea.contains(wp))
+		// claimable() excludes the unwalkable filler tiles (including the two trapdoor/shortcut tiles a player
+		// can physically stand on): those are never claimed, counted, or synced - they fill cosmetically from a
+		// claimed neighbor. contains() alone would let a shortcut-reached filler tile write a real claim.
+		if (!GrandExchangeArea.claimable(wp))
 		{
 			return;
 		}
