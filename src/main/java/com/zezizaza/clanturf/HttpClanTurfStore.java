@@ -92,6 +92,7 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile Map<String, String> allyOwnerById = Collections.emptyMap(); // allianceId -> owner clan
 	private volatile Map<String, Integer> allyIconById = Collections.emptyMap(); // allianceId -> symbol sprite id
 	private volatile Map<String, String> allyColorById = Collections.emptyMap(); // allianceId -> 6-hex color
+	private volatile Map<String, Integer> allyHomeById = Collections.emptyMap(); // allianceId -> home world (0/absent = unset)
 
 	// Opt-in overhead-indicator roster from /roster: standardized player name(lower) -> allianceId.
 	private volatile Map<String, String> roster = Collections.emptyMap();
@@ -162,6 +163,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		allyNameById = Collections.emptyMap();
 		allyOwnerById = Collections.emptyMap();
 		allyIconById = Collections.emptyMap();
+		allyHomeById = Collections.emptyMap();
 	}
 
 	@Override
@@ -222,6 +224,7 @@ class HttpClanTurfStore implements ClanTurfStore
 			allyNameById = Collections.emptyMap();
 			allyOwnerById = Collections.emptyMap();
 			allyIconById = Collections.emptyMap();
+			allyHomeById = Collections.emptyMap();
 		}
 		else
 		{
@@ -423,6 +426,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		Map<String, String> colorById = new HashMap<>();
 		Map<String, String> ownerById = new HashMap<>();
 		Map<String, Integer> iconById = new HashMap<>();
+		Map<String, Integer> homeById = new HashMap<>();
 		for (String line : body.split("\n"))
 		{
 			if (line.isBlank())
@@ -450,6 +454,21 @@ class HttpClanTurfStore implements ClanTurfStore
 					catch (NumberFormatException ignored)
 					{
 						// skip a malformed icon line
+					}
+				}
+			}
+			else if (line.startsWith("HW,"))
+			{
+				String[] f = line.split(",", 3); // HW,id,homeWorld
+				if (f.length >= 3)
+				{
+					try
+					{
+						homeById.put(f[1], Integer.parseInt(f[2].trim()));
+					}
+					catch (NumberFormatException ignored)
+					{
+						// skip a malformed home-world line
 					}
 				}
 			}
@@ -486,6 +505,7 @@ class HttpClanTurfStore implements ClanTurfStore
 		allyOwnerById = ownerById;
 		allyIconById = iconById;
 		allyColorById = colorById;
+		allyHomeById = homeById;
 	}
 
 	/** Pulls the opt-in roster: standardized player name -> alliance id, for overhead indicators. */
@@ -742,6 +762,38 @@ class HttpClanTurfStore implements ClanTurfStore
 	}
 
 	@Override
+	public int allianceHomeWorldOf(String clan)
+	{
+		String aid = allianceIdOf(clan);
+		Integer w = aid == null ? null : allyHomeById.get(aid);
+		return w == null ? 0 : w; // 0 = unset/unknown
+	}
+
+	@Override
+	public int allianceHomeWorldByDisplay(String display)
+	{
+		if (display == null)
+		{
+			return 0;
+		}
+		for (Map.Entry<String, Integer> e : allyHomeById.entrySet())
+		{
+			String nm = allyNameById.get(e.getKey());
+			if (display.equalsIgnoreCase(nm) || display.equals(e.getKey()))
+			{
+				return e.getValue() == null ? 0 : e.getValue();
+			}
+		}
+		return 0;
+	}
+
+	@Override
+	public Map<String, Integer> allianceHomeWorlds()
+	{
+		return allyHomeById; // id -> world; the plugin compares this to detect a home-world change
+	}
+
+	@Override
 	public List<String> allianceMembersByDisplay(String display)
 	{
 		if (display != null)
@@ -775,11 +827,11 @@ class HttpClanTurfStore implements ClanTurfStore
 
 	// ---- alliance actions: blocking POSTs, so the plugin runs them off the game/EDT thread ----
 
-	String allianceCreate(String clan, String name, String color, String passcode, int icon)
+	String allianceCreate(String clan, String name, String color, String passcode, int icon, int homeWorld)
 	{
 		return sendResult("POST", "/alliance/create",
 				form("clan", clan, "name", name, "color", color, "passcode", passcode,
-						"icon", String.valueOf(icon)));
+						"icon", String.valueOf(icon), "homeWorld", String.valueOf(homeWorld)));
 	}
 
 	String allianceJoin(String clan, String passcode)
@@ -868,6 +920,13 @@ class HttpClanTurfStore implements ClanTurfStore
 	{
 		return sendResult("POST", "/alliance/seticon",
 				form("id", id, "clan", clan, "icon", String.valueOf(icon)));
+	}
+
+	/** Owner clan only: set the alliance's home world (a validated world number). */
+	String allianceSetHomeWorld(String id, String clan, int world)
+	{
+		return sendResult("POST", "/alliance/sethomeworld",
+				form("id", id, "clan", clan, "world", String.valueOf(world)));
 	}
 
 	/** Owner clan only: un-block a previously kicked clan so it can rejoin with the passcode. */

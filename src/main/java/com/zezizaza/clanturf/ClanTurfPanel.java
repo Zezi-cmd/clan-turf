@@ -114,7 +114,7 @@ class ClanTurfPanel extends PluginPanel
 	private final java.util.Map<Integer, java.awt.image.BufferedImage> spriteRawCache = new java.util.HashMap<>();
 	private final java.util.Set<Integer> spriteRequested = new java.util.HashSet<>();
 	private final Leaderboard board = new Leaderboard(this::openColorPicker, this::leaderboardRoster,
-			this::leaderboardAllianceIconId, this::leaderboardIconImage);
+			this::leaderboardAllianceIconId, this::leaderboardIconImage, this::leaderboardHomeWorld);
 	private final JLabel battlesHeader = new JLabel("Active battles");
 	private final JPanel battlesBox = new JPanel();
 
@@ -143,6 +143,7 @@ class ClanTurfPanel extends PluginPanel
 	private final JTextField nameField = new JTextField();
 	private final JLabel allianceNameLabel = new JLabel();
 	private final JTextField createPass = new JTextField();
+	private final JTextField createWorldField = new JTextField(); // create form: optional home world (blank = clan's)
 	private final JTextField joinPass = new JTextField();
 	private final StyledButton createBtn = new StyledButton("Create alliance", 26);
 	private final StyledButton joinBtn = new StyledButton("Join alliance", 26);
@@ -151,10 +152,14 @@ class ClanTurfPanel extends PluginPanel
 	private final JLabel alliancePasscodeLabel = new JLabel(); // owner clan only: click to copy the code
 	private String alliancePasscodeValue;                      // the raw passcode the label copies
 	private Timer passcodeCopyTimer;                           // reverts the "copied" flash back to the code
+	private boolean passcodeRevealed;                          // owner: passcode shown vs masked (default masked)
+	private final JLabel passcodeEyeLabel = new JLabel();      // click to reveal/hide the passcode
+	private final JPanel passcodeRow = new JPanel();           // holds the passcode label + the reveal toggle
 	private Timer statusClearTimer;                            // clears transient alliance status messages
 	private final StyledButton changePasscodeBtn = new StyledButton("Change passcode", 26);
 	private final StyledButton changeNameBtn = new StyledButton("Change name", 26);
 	private final StyledButton changeIconBtn = new StyledButton("Change icon", 26);
+	private final StyledButton changeHomeWorldBtn = new StyledButton("Change home world", 26);
 	private final JLabel allianceIconLabel = new JLabel();  // symbol to the left of the alliance name
 	private final JLabel allianceIconLabelR = new JLabel(); // matching symbol to the right of the name
 	private final JPanel allianceNameRow = new JPanel();    // [icon][name][icon] side by side
@@ -162,6 +167,10 @@ class ClanTurfPanel extends PluginPanel
 	private final java.util.Map<Integer, ImageIcon> iconCache = new java.util.HashMap<>(); // spriteId -> icon
 	private SpriteManager spriteManager;                    // loads clan-symbol sprites from the player cache
 	private Consumer<Integer> onChangeIcon;                 // owner: set the alliance symbol
+	private Consumer<Integer> onChangeHomeWorld;            // owner: set the alliance home world
+	private final JLabel allianceHomeLabel = new JLabel();  // "Home World: NNN" under the name in Alliance Tools
+	private int allianceHomeWorldValue;                     // current alliance home world (0 = unset)
+	private java.util.function.ToIntFunction<String> homeWorldLookup; // alliance display name -> home world, for the drawer
 	private final JPanel allianceMembersList = new JPanel(); // owner view: member rows, each with a kick X
 	private String membersRowsSig; // guard so the member rows only rebuild when they actually change
 	private Consumer<String> onKickClan;    // owner: kick + block an allied clan
@@ -1498,9 +1507,10 @@ class ClanTurfPanel extends PluginPanel
 
 		if (current)
 		{
-			// Active world: world tag pinned left, the matchup centered in the space to its right so
-			// it sits between W# and the panel's right edge.
-			JLabel worldLabel = new JLabel("<html><b>W" + b.getWorld() + "</b></html>");
+			// Active world: world tag pinned left, the matchup left-aligned right beside it.
+			// [HW] sits next to the world number so it never offsets the name.
+			String hwWorld = isHomeBattle(b) ? "&nbsp;&nbsp;<span style='color:#ffd700'>[HW]</span>" : "";
+			JLabel worldLabel = new JLabel("<html><b>W" + b.getWorld() + "</b>" + hwWorld + "</html>");
 			worldLabel.setFont(FontManager.getRunescapeFont());
 			worldLabel.setForeground(Color.WHITE);
 			row.add(worldLabel, BorderLayout.WEST);
@@ -1530,35 +1540,61 @@ class ClanTurfPanel extends PluginPanel
 			JLabel matchupLabel = new JLabel(matchup);
 			matchupLabel.setFont(FontManager.getRunescapeFont());
 			matchupLabel.setForeground(Color.WHITE);
-			matchupLabel.setHorizontalAlignment(JLabel.CENTER);
+			matchupLabel.setHorizontalAlignment(JLabel.LEFT);
 			row.add(matchupLabel, BorderLayout.CENTER);
 			return row;
 		}
 
-		// Other worlds: a single compact info label (the world's in the label, hop to it yourself).
-		String worldTag = "<b>W" + b.getWorld() + "</b>";
-		String ownerCell = "<span style='color:#" + ownerHex + "'>" + escape(clip(b.getOwner(), BATTLE_NAME_CLIP))
-				+ "</span>&nbsp;" + b.getOwnerTiles();
-		String html;
+		// Other worlds: world (+ [HW]) and the clan name(s) on the left with the "vs" between the two names;
+		// the tile counts go in a separate right-aligned EAST label so they line up in a column down the list
+		// (BorderLayout pins EAST to the right edge, which a JLabel's own HTML width can't reliably do).
+		String hwWorld = isHomeBattle(b) ? "&nbsp;&nbsp;<span style='color:#ffd700'>[HW]</span>" : "";
+		String worldTag = "<b>W" + b.getWorld() + "</b>" + hwWorld;
+		String ownerName = "<span style='color:#" + ownerHex + "'>"
+				+ escape(clip(b.getOwner(), BATTLE_NAME_CLIP)) + "</span>";
+		String leftHtml;
+		String rightHtml;
 		if (b.getRunnerUp() != null)
 		{
 			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
-			String upCell = "<span style='color:#" + upHex + "'>" + escape(clip(b.getRunnerUp(), BATTLE_NAME_CLIP))
-					+ "</span>&nbsp;" + b.getRunnerUpTiles();
-			html = "<html><table cellpadding=0 cellspacing=0>"
-					+ "<tr><td>" + worldTag + "&nbsp;</td><td>" + ownerCell
-					+ "</td><td rowspan=2 valign='middle'>&nbsp;vs&nbsp;</td></tr>"
-					+ "<tr><td></td><td>" + upCell + "</td></tr></table></html>";
+			String upName = "<span style='color:#" + upHex + "'>"
+					+ escape(clip(b.getRunnerUp(), BATTLE_NAME_CLIP)) + "</span>";
+			leftHtml = "<html><table cellpadding=0 cellspacing=0>"
+					+ "<tr><td valign='top'>" + worldTag + "&nbsp;&nbsp;</td>"
+					+ "<td>" + ownerName + "</td>"
+					+ "<td rowspan=2 valign='middle'>&nbsp;vs&nbsp;</td></tr>"
+					+ "<tr><td></td><td>" + upName + "</td></tr></table></html>";
+			rightHtml = "<html><div align='right'>" + b.getOwnerTiles() + "<br>"
+					+ b.getRunnerUpTiles() + "</div></html>";
 		}
 		else
 		{
-			html = "<html>" + worldTag + "&nbsp; " + ownerCell + "</html>";
+			leftHtml = "<html>" + worldTag + "&nbsp;&nbsp;" + ownerName + "</html>";
+			rightHtml = "<html>" + b.getOwnerTiles() + "</html>";
 		}
-		JLabel info = new JLabel(html);
+		JLabel info = new JLabel(leftHtml);
 		info.setFont(FontManager.getRunescapeSmallFont());
 		info.setForeground(Color.WHITE);
 		row.add(info, BorderLayout.CENTER);
+		JLabel tiles = new JLabel(rightHtml);
+		tiles.setFont(FontManager.getRunescapeSmallFont());
+		tiles.setForeground(Color.WHITE);
+		tiles.setHorizontalAlignment(JLabel.RIGHT);
+		tiles.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 32)); // buffer so counts aren't flush right
+		row.add(tiles, BorderLayout.EAST);
 		return row;
+	}
+
+	/** True if this battle's world is the home world of either participant (owner or runner-up), so the
+	 *  row can show a gold [HW] tag next to the world number without offsetting the clan names. */
+	private boolean isHomeBattle(ClanTurfBattle b)
+	{
+		if (homeWorldLookup == null || b.getWorld() <= 0)
+		{
+			return false;
+		}
+		return (b.getOwner() != null && homeWorldLookup.applyAsInt(b.getOwner()) == b.getWorld())
+				|| (b.getRunnerUp() != null && homeWorldLookup.applyAsInt(b.getRunnerUp()) == b.getWorld());
 	}
 
 	private static String hex(Color c)
@@ -1997,10 +2033,12 @@ class ClanTurfPanel extends PluginPanel
 		});
 		styleField(nameField);
 		styleField(createPass);
+		styleField(createWorldField);
 		styleField(joinPass);
 		limitAllianceName(nameField);
 		nameField.setToolTipText("Up to 2 words, 10 letters each");
 		createPass.setToolTipText("Leave blank and a random passcode is generated for you");
+		createWorldField.setToolTipText("Leave blank to use your clan's home world");
 		joinPass.setToolTipText("Alliance passcode");
 		createBtn.onClick(() ->
 		{
@@ -2015,7 +2053,8 @@ class ClanTurfPanel extends PluginPanel
 				return;
 			}
 			onCreateAlliance.accept(new String[]{nm, hex6(createColor),
-					createPass.getText().trim(), String.valueOf(createIcon)});
+					createPass.getText().trim(), String.valueOf(createIcon),
+					createWorldField.getText().trim()});
 		});
 		createIconBtn.setPreferredSize(new Dimension(36, 36));
 		createIconBtn.setMaximumSize(new Dimension(36, 36));
@@ -2043,6 +2082,10 @@ class ClanTurfPanel extends PluginPanel
 		allianceJoinCreate.add(smallLabel("Passcode"));
 		allianceJoinCreate.add(Box.createVerticalStrut(2));
 		allianceJoinCreate.add(createPass);
+		allianceJoinCreate.add(Box.createVerticalStrut(8));
+		allianceJoinCreate.add(smallLabel("Home world (blank = your clan's)"));
+		allianceJoinCreate.add(Box.createVerticalStrut(2));
+		allianceJoinCreate.add(createWorldField);
 		allianceJoinCreate.add(Box.createVerticalStrut(8));
 		allianceJoinCreate.add(smallLabel("Pick an alliance color and symbol."));
 		allianceJoinCreate.add(Box.createVerticalStrut(3));
@@ -2111,7 +2154,6 @@ class ClanTurfPanel extends PluginPanel
 		alliancePasscodeLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		alliancePasscodeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		alliancePasscodeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		alliancePasscodeLabel.setVisible(false);
 		alliancePasscodeLabel.addMouseListener(new MouseAdapter()
 		{
 			@Override
@@ -2133,6 +2175,30 @@ class ClanTurfPanel extends PluginPanel
 				passcodeCopyTimer.start();
 			}
 		});
+		// Reveal/hide toggle: the passcode is masked by default so it isn't left on screen. Clicking the code
+		// still copies the real value whether it's shown or masked.
+		passcodeEyeLabel.setFont(FontManager.getRunescapeSmallFont());
+		passcodeEyeLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR); // match the members' kick "x"
+		passcodeEyeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		passcodeEyeLabel.setText("show");
+		passcodeEyeLabel.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				passcodeRevealed = !passcodeRevealed;
+				passcodeEyeLabel.setText(passcodeRevealed ? "hide" : "show");
+				renderPasscode();
+			}
+		});
+		passcodeRow.setLayout(new BoxLayout(passcodeRow, BoxLayout.X_AXIS));
+		passcodeRow.setOpaque(false);
+		passcodeRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		passcodeRow.add(alliancePasscodeLabel);
+		passcodeRow.add(Box.createHorizontalStrut(8));
+		passcodeRow.add(passcodeEyeLabel);
+		passcodeRow.add(Box.createHorizontalGlue());
+		passcodeRow.setVisible(false);
 		allianceNameLabel.setFont(HEADER_FONT);
 		allianceNameLabel.setForeground(ColorScheme.BRAND_ORANGE);
 		allianceNameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2163,6 +2229,10 @@ class ClanTurfPanel extends PluginPanel
 				onChangeIcon.accept(id);
 			}
 		}));
+		changeHomeWorldBtn.onClick(this::openChangeHomeWorld);
+		allianceHomeLabel.setFont(FontManager.getRunescapeSmallFont());
+		allianceHomeLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		allianceHomeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		// The member panel's contents are (re)built by layoutMemberPanel() whenever the view shape changes
 		// (owner vs joined vs read-only), so hidden buttons never leave phantom gaps.
 		allianceMemberPanel.setVisible(false);
@@ -2259,12 +2329,14 @@ class ClanTurfPanel extends PluginPanel
 	{
 		allianceMemberPanel.removeAll();
 		allianceMemberPanel.add(allianceNameRow);
+		allianceMemberPanel.add(Box.createVerticalStrut(8)); // gap between the name/symbols and the home world
+		allianceMemberPanel.add(allianceHomeLabel); // "Home World: NNN" under the name, above allied clans
 		allianceMemberPanel.add(Box.createVerticalStrut(6)); // breathing room below the flanking symbols
 		allianceMemberPanel.add(owner ? allianceMembersList : allianceMembersLabel);
 		if (owner)
 		{
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
-			allianceMemberPanel.add(alliancePasscodeLabel);
+			allianceMemberPanel.add(passcodeRow);
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
 			allianceMemberPanel.add(changeNameBtn);
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
@@ -2273,6 +2345,8 @@ class ClanTurfPanel extends PluginPanel
 			allianceMemberPanel.add(changePasscodeBtn);
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
 			allianceMemberPanel.add(changeColorBtn);
+			allianceMemberPanel.add(Box.createVerticalStrut(6));
+			allianceMemberPanel.add(changeHomeWorldBtn);
 			allianceMemberPanel.add(Box.createVerticalStrut(6));
 			allianceMemberPanel.add(leaveBtn);
 		}
@@ -2291,21 +2365,34 @@ class ClanTurfPanel extends PluginPanel
 		if (code == null || code.isEmpty())
 		{
 			alliancePasscodeValue = null;
-			alliancePasscodeLabel.setVisible(false);
+			passcodeRow.setVisible(false);
 			return;
 		}
 		alliancePasscodeValue = code;
+		passcodeRevealed = false;        // always start masked when a code is (re)set
+		passcodeEyeLabel.setText("show");
 		renderPasscode();
-		alliancePasscodeLabel.setVisible(true);
+		passcodeRow.setVisible(true);
 	}
 
 	private void renderPasscode()
 	{
 		if (alliancePasscodeValue != null && !alliancePasscodeValue.isEmpty())
 		{
-			alliancePasscodeLabel.setText("<html>Passcode: " + alliancePasscodeValue
-					+ "<br>(click to copy)</html>");
+			String shown = passcodeRevealed ? alliancePasscodeValue : maskPasscode(alliancePasscodeValue);
+			alliancePasscodeLabel.setText("<html>Passcode: " + shown + "<br>(click to copy)</html>");
 		}
+	}
+
+	/** A run of bullets the same length as the code, for the masked (hidden) passcode. */
+	private static String maskPasscode(String code)
+	{
+		StringBuilder sb = new StringBuilder(code.length());
+		for (int i = 0; i < code.length(); i++)
+		{
+			sb.append('•'); // bullet
+		}
+		return sb.toString();
 	}
 
 	/** Owner staff view: one row per member clan; each non-owner clan gets a small "x" that kicks + blocks
@@ -2421,6 +2508,53 @@ class ClanTurfPanel extends PluginPanel
 		}
 	}
 
+	/** Owner staff: popup to change the alliance home world. The plugin validates the number. */
+	private void openChangeHomeWorld()
+	{
+		if (onChangeHomeWorld == null)
+		{
+			return;
+		}
+		JTextField field = new JTextField();
+		JPanel form = new JPanel(new java.awt.GridLayout(0, 1, 0, 4));
+		form.add(new JLabel("New home world (a world number)"));
+		form.add(field);
+		int r = JOptionPane.showConfirmDialog(this, form, "Change home world",
+				JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+		if (r == JOptionPane.OK_OPTION)
+		{
+			try
+			{
+				onChangeHomeWorld.accept(Integer.parseInt(field.getText().trim()));
+			}
+			catch (NumberFormatException ex)
+			{
+				setAllianceStatus("Enter a world number.");
+			}
+		}
+	}
+
+	/** Set the alliance home world shown under the name in Alliance Tools (0 = unset, hides the label). */
+	void setAllianceHomeWorld(int world)
+	{
+		allianceHomeWorldValue = world;
+		if (world > 0)
+		{
+			allianceHomeLabel.setText("<html>Home World:<br>" + world + "</html>");
+			allianceHomeLabel.setVisible(true);
+		}
+		else
+		{
+			allianceHomeLabel.setVisible(false);
+		}
+	}
+
+	/** Lookup an alliance's home world by its display name, for the scoreboard drawer. */
+	void setAllianceHomeWorldLookup(java.util.function.ToIntFunction<String> f)
+	{
+		this.homeWorldLookup = f;
+	}
+
 	/** Owner staff: popup to change the passcode. Enter the current code plus a new one. */
 	private void openChangePasscode()
 	{
@@ -2450,12 +2584,13 @@ class ClanTurfPanel extends PluginPanel
 
 	/** Wire the owner-only alliance actions (kick, rename, change passcode) after construction. */
 	void setAllianceOwnerHandlers(Consumer<String> onKick, Consumer<String> onRename,
-			BiConsumer<String, String> onChangePass, Consumer<Integer> onIcon)
+			BiConsumer<String, String> onChangePass, Consumer<Integer> onIcon, Consumer<Integer> onHomeWorld)
 	{
 		this.onKickClan = onKick;
 		this.onChangeName = onRename;
 		this.onChangePasscode = onChangePass;
 		this.onChangeIcon = onIcon;
+		this.onChangeHomeWorld = onHomeWorld;
 	}
 
 	/** The plugin hands us its SpriteManager so we can load clan-symbol sprites from the player's cache. */
@@ -2474,6 +2609,11 @@ class ClanTurfPanel extends PluginPanel
 	private int leaderboardAllianceIconId(String display)
 	{
 		return allianceIconLookup.applyAsInt(display);
+	}
+
+	private int leaderboardHomeWorld(String display)
+	{
+		return homeWorldLookup == null ? 0 : homeWorldLookup.applyAsInt(display);
 	}
 
 	/** The plugin wires this so clicking a bar's symbol can list that alliance's member clans. */
@@ -2848,6 +2988,7 @@ class ClanTurfPanel extends PluginPanel
 		// display name -> member clans each paired with the tiles it holds (for the inline drawer breakdown)
 		private final java.util.function.Function<String, java.util.List<Map.Entry<String, Long>>> rosterLookup;
 		private final java.util.function.ToIntFunction<String> allianceIconId; // display name -> icon id (0=none)
+		private final java.util.function.ToIntFunction<String> homeWorldLookup; // display name -> home world (0=none)
 		private final java.util.function.IntFunction<java.awt.image.BufferedImage> iconImage; // id -> sprite
 		private static final int ICON_GUTTER = 32;  // right-side space reserved on every bar for the symbol
 		private static final int EXP_PAD = 6;       // inner padding of the inline alliance-info drawer
@@ -2859,12 +3000,14 @@ class ClanTurfPanel extends PluginPanel
 		Leaderboard(Consumer<String> onClickClan,
 				java.util.function.Function<String, java.util.List<Map.Entry<String, Long>>> rosterLookup,
 				java.util.function.ToIntFunction<String> allianceIconId,
-				java.util.function.IntFunction<java.awt.image.BufferedImage> iconImage)
+				java.util.function.IntFunction<java.awt.image.BufferedImage> iconImage,
+				java.util.function.ToIntFunction<String> homeWorldLookup)
 		{
 			this.onClickClan = onClickClan;
 			this.rosterLookup = rosterLookup;
 			this.allianceIconId = allianceIconId;
 			this.iconImage = iconImage;
+			this.homeWorldLookup = homeWorldLookup;
 			setForeground(Color.WHITE);
 			timer = new Timer(16, e -> tick());
 			MouseAdapter ma = new MouseAdapter()
@@ -3140,7 +3283,9 @@ class ClanTurfPanel extends PluginPanel
 		{
 			java.util.List<Map.Entry<String, Long>> members = rosterLookup == null ? null : rosterLookup.apply(r.clan);
 			int n = (members == null || members.isEmpty()) ? 1 : members.size();
-			return EXP_PAD * 2 + EXP_LINE * (n + 2);
+			int home = homeWorldLookup == null ? 0 : homeWorldLookup.applyAsInt(r.clan);
+			// name line + optional home-world line + "Allied clans:" header + one line per member
+			return EXP_PAD * 2 + EXP_LINE * (n + 2 + (home > 0 ? 1 : 0));
 		}
 
 		@Override
@@ -3271,6 +3416,12 @@ class ClanTurfPanel extends PluginPanel
 					String fullName = ellipsize(g2.getFontMetrics(), r.clan, dw - 16);
 					drawShadowed(g2, fullName, 8, lineY, r.color);
 					lineY += EXP_LINE;
+					int drawerHome = homeWorldLookup == null ? 0 : homeWorldLookup.applyAsInt(r.clan);
+					if (drawerHome > 0)
+					{
+						drawShadowed(g2, "Home World: " + drawerHome, 8, lineY, Color.WHITE);
+						lineY += EXP_LINE;
+					}
 					drawShadowed(g2, "Allied clans:", 8, lineY, ColorScheme.LIGHT_GRAY_COLOR);
 					List<Map.Entry<String, Long>> members = rosterLookup == null ? null : rosterLookup.apply(r.clan);
 					if (members == null || members.isEmpty())

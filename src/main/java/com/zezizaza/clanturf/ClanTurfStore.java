@@ -142,6 +142,24 @@ interface ClanTurfStore
 		return 0;
 	}
 
+	/** A clan's alliance home world, or 0 if unset/not in an alliance. Networked store only. */
+	default int allianceHomeWorldOf(String clan)
+	{
+		return 0;
+	}
+
+	/** The home world for an alliance addressed by its display name (or id), or 0 if unset. Networked only. */
+	default int allianceHomeWorldByDisplay(String display)
+	{
+		return 0;
+	}
+
+	/** All alliance home worlds (alliance id -> world), for detecting a change. Networked store only. */
+	default Map<String, Integer> allianceHomeWorlds()
+	{
+		return Collections.emptyMap();
+	}
+
 	/** The member clans of an alliance addressed by its display name (or id); empty if not an alliance. */
 	default List<String> allianceMembersByDisplay(String display)
 	{
