@@ -378,11 +378,11 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(
 			keyName = "showPlayerIndicators",
 			section = optionalFeaturesSection,
-			name = "Show player indicators",
-			description = "Float the alliance symbol, in the alliance color, over players' heads so you can spot "
-					+ "allies and rivals. This OPTS YOU IN: your name is added to a public roster so others can "
-					+ "see your symbol - only your name and alliance are sent, never your location, and you are "
-					+ "removed shortly after you turn this off.",
+			name = "Share my symbol",
+			description = "Put your alliance symbol, in the alliance color, over your own head so others can spot "
+					+ "you. This OPTS YOU IN: your name and alliance are added to a public roster - only your name "
+					+ "and alliance are sent, never your location, and you are removed shortly after you turn it "
+					+ "off. You can see other opted-in players' symbols whether or not this is on.",
 			position = 0
 	)
 	default boolean showPlayerIndicators()
@@ -394,10 +394,10 @@ public interface ClanTurfConfig extends Config
 			keyName = "leaderboardOptIn",
 			section = optionalFeaturesSection,
 			name = "Clan leaderboard",
-			description = "Join your clan's daily and weekly tile leaderboard so clanmates can run events. This "
-					+ "OPTS YOU IN: your name, your clan, and your daily and weekly tile counts are sent to the "
-					+ "server so opted-in clanmates can see the board. Only opted-in players appear on it. Turn it "
-					+ "off to be removed. Your own tile counter shows either way, opted in or not.",
+			description = "Add your daily and weekly tile counts to your clan's leaderboard so clanmates can run "
+					+ "events. This OPTS YOU IN: your name, clan, and tile counts are sent to the server. Only "
+					+ "opted-in players appear on the board - turn it off to be removed. You can view your clan's "
+					+ "board either way, and your own tile counter always shows.",
 			position = 1
 	)
 	default boolean leaderboardOptIn()

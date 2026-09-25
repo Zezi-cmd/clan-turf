@@ -234,6 +234,7 @@ class ClanTurfPanel extends PluginPanel
 	private String lbMyName;
 	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoard = java.util.Collections.emptyList();
 	private String lastLbSig = ""; // skip the rebuild (and its flicker) when nothing displayed has changed
+	private String changelogHtml = ""; // full version history HTML for the "What's New" dialog
 	private boolean lbReady; // true once the first board poll has completed (else show "Loading")
 	private java.util.Map<String, javax.swing.Icon> lbRankIcons = java.util.Collections.emptyMap(); // name -> rank icon
 	private String lbClanName = ""; // your clan, shown above the board
@@ -506,7 +507,8 @@ class ClanTurfPanel extends PluginPanel
 		// collects nothing here - reports live on GitHub, not on our server. Set in a slightly lighter
 		// box so it reads as its own footer, apart from the scoreboard above.
 		JLabel reportBlurb = new JLabel("<html><body style='width:150px'>I can't be tick-perfect all the "
-				+ "time. Found a bug with the plug? 1-tick-click that Report Button.</body></html>");
+				+ "time. Found a bug with the plug? 1-tick-click that Report Button. Or check out what's "
+				+ "been added so far.</body></html>");
 		reportBlurb.setFont(FontManager.getRunescapeSmallFont());
 		reportBlurb.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		reportBlurb.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -525,9 +527,19 @@ class ClanTurfPanel extends PluginPanel
 		reportBox.setBackground(new Color(0x36, 0x36, 0x36)); // a touch lighter than the panel
 		reportBox.setAlignmentX(Component.LEFT_ALIGNMENT);
 		reportBox.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		JButton whatsNewBtn = new JButton("Changelog");
+		whatsNewBtn.setFont(FontManager.getRunescapeFont());
+		whatsNewBtn.setFocusable(false);
+		whatsNewBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		whatsNewBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, whatsNewBtn.getPreferredSize().height));
+		whatsNewBtn.setToolTipText("See every Clan Turf update note, in case you missed one in chat.");
+		whatsNewBtn.addActionListener(e -> showWhatsNew());
+
 		reportBox.add(reportBlurb);
 		reportBox.add(Box.createVerticalStrut(6));
 		reportBox.add(reportBtn);
+		reportBox.add(Box.createVerticalStrut(6));
+		reportBox.add(whatsNewBtn);
 
 		// Offline sandbox: creative/practice tools that only make sense with no live turf war. Hidden
 		// online; fades in when you go offline. Phase 1 is the Full Slug paint toggle.
@@ -1780,18 +1792,17 @@ class ClanTurfPanel extends PluginPanel
 		leaderboardBox.add(thinDivider());
 		leaderboardBox.add(Box.createVerticalStrut(6));
 
-		// The clan board is gated behind opting in: you have to be on the board to view it.
+		// Anyone can view the clan board; opting in only decides whether you are ON it. If you haven't opted
+		// in, show the board anyway with a nudge to join it.
 		if (!lbOptedIn)
 		{
-			JLabel gate = new JLabel("<html><body style='width:170px'>"
-					+ "Turn on Clan leaderboard in Opt-In Features to view your clan's board.</body></html>");
-			gate.setFont(FontManager.getRunescapeSmallFont());
-			gate.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-			gate.setAlignmentX(Component.LEFT_ALIGNMENT);
-			leaderboardBox.add(gate);
-			leaderboardBox.revalidate();
-			leaderboardBox.repaint();
-			return;
+			JLabel prompt = new JLabel("<html><body style='width:170px'>"
+					+ "Toggle Clan leaderboard on in Opt-In Features to add your tiles here.</body></html>");
+			prompt.setFont(FontManager.getRunescapeSmallFont());
+			prompt.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			prompt.setAlignmentX(Component.LEFT_ALIGNMENT);
+			leaderboardBox.add(prompt);
+			leaderboardBox.add(Box.createVerticalStrut(4));
 		}
 
 		// "<Clan>'s Top Turfers:" (clan name and its possessive 's both in the clan color).
@@ -1889,9 +1900,15 @@ class ClanTurfPanel extends PluginPanel
 			leftGroup.add(nameL);
 			row.add(leftGroup, BorderLayout.WEST);
 
-			JLabel count = new JLabel(String.valueOf(v));
+			// Fixed-width, right-aligned count slot: a number changing digit count (9 -> 2211) must not
+			// resize the row, or the whole panel's width oscillates and the text jumps around.
+			JLabel count = new JLabel(String.valueOf(v), JLabel.RIGHT);
 			count.setFont(font);
 			count.setForeground(fg);
+			Dimension cd = new Dimension(48, count.getPreferredSize().height);
+			count.setPreferredSize(cd);
+			count.setMinimumSize(cd);
+			count.setMaximumSize(cd);
 			row.add(count, BorderLayout.EAST);
 
 			row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
@@ -2511,6 +2528,57 @@ class ClanTurfPanel extends PluginPanel
 	void setAllianceHomeWorldLookup(java.util.function.ToIntFunction<String> f)
 	{
 		this.homeWorldLookup = f;
+	}
+
+	/** The plugin hands us the full version-history HTML for the "What's New" dialog. */
+	void setChangelog(String html)
+	{
+		this.changelogHtml = html == null ? "" : html;
+	}
+
+	/** Popup with every update note, newest first, for anyone who missed a login changelog. */
+	private void showWhatsNew()
+	{
+		// A JEditorPane (unlike a JLabel) tracks the viewport width and re-wraps HTML text to fit it, so the
+		// text never renders wider than the pane and gets clipped. Non-editable, themed to the dark dialog.
+		javax.swing.JEditorPane content = new javax.swing.JEditorPane("text/html", changelogHtml.isEmpty()
+				? "<html><body style='color:#c8c8c8'>No update notes yet.</body></html>" : changelogHtml);
+		content.setEditable(false);
+		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		content.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+		content.setCaretPosition(0);
+		javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(content);
+		scroll.setPreferredSize(new Dimension(470, 600));
+		scroll.setHorizontalScrollBarPolicy(javax.swing.JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scroll.getVerticalScrollBar().setUnitIncrement(16);
+
+		// Build the dialog by hand instead of showMessageDialog so we can move it off the side panel -
+		// centered on this panel it lands on top of the sidebar. Nudge it left of the panel's left edge.
+		JOptionPane pane = new JOptionPane(scroll, JOptionPane.PLAIN_MESSAGE);
+		javax.swing.JDialog dialog = pane.createDialog(this, "Clan Turf - Changelog");
+		// Non-modal so it floats over the game without blocking clicks/camera behind it. Dispose when the user
+		// clicks OK (pane value changes) or closes the window; don't dispose right after showing, or a non-modal
+		// dialog would vanish instantly.
+		dialog.setModal(false);
+		dialog.setAlwaysOnTop(true); // floats above the game window so it doesn't get buried while you play
+		dialog.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
+		pane.addPropertyChangeListener(ev ->
+		{
+			if (JOptionPane.VALUE_PROPERTY.equals(ev.getPropertyName()) && dialog.isVisible())
+			{
+				dialog.dispose();
+			}
+		});
+		java.awt.Point panelOnScreen = getLocationOnScreen();
+		int x = panelOnScreen.x - dialog.getWidth() - 16;
+		if (x < 8)
+		{
+			x = 8; // keep it on screen if the panel is hard against the left edge
+		}
+		int y = panelOnScreen.y + 24;
+		dialog.setLocation(x, y);
+		dialog.setVisible(true);
 	}
 
 	/** Owner staff: popup to change the passcode. Enter the current code plus a new one. */

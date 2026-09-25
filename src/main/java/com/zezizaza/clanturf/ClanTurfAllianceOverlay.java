@@ -84,13 +84,13 @@ class ClanTurfAllianceOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		// One time-based fade covering both opting in/out and GE proximity, so nothing pops. Target is
-		// visible when indicators are on and - if "Hide indicators outside GE" is set - you are near the GE.
+		// One time-based fade covering GE proximity, so nothing pops. Anyone sees opted-in players' symbols
+		// (viewing is not gated on your own opt-in); "Show player indicators" only controls whether YOU are
+		// published. Target is visible unless "Hide indicators outside GE" is set and you are away from it.
 		long nowMs = System.currentTimeMillis();
 		double dt = lastRenderMs == 0 ? 16.0 : Math.min(200.0, nowMs - lastRenderMs);
 		lastRenderMs = nowMs;
-		boolean visible = config.showPlayerIndicators()
-				&& (plugin.isNearGe() || !config.hideIndicatorsOutsideGe());
+		boolean visible = plugin.isNearGe() || !config.hideIndicatorsOutsideGe();
 		fade = Math.max(0.0, Math.min(1.0, fade + (visible ? dt : -dt) / FADE_MS));
 		if (fade <= 0.0)
 		{

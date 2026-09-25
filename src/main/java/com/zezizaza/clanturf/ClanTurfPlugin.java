@@ -301,12 +301,32 @@ public class ClanTurfPlugin extends Plugin
 	/** Header label. Kept as "[Update]" for now. Set to null in a future release to auto-use the
 	 *  Hub-built jar version instead (see updateMessage()). */
 	private static final String UPDATE_LABEL = "[Update]";
-	private static final String[] UPDATE_LINES = {
-		"New: Alliance home worlds. Every alliance can now claim a home world. Set one when you create an alliance, or change it any time in Alliance Tools, Change home world.",
-		"Your alliance's home world shows under its name in the side panel and in the scoreboard drop-down.",
-		"A gold [HW] tag appears next to an alliance in Active Battles when the fight is on its own home world.",
-		"Alliances made before this update start with no home world. An owner just needs to set it once in Alliance Tools.",
+	/** Full version history, newest first. Element [0] of each row is the version tag; the rest are that
+	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
+	 *  all of them, so anyone who missed a login message can still read the history. */
+	private static final String[][] CHANGELOG = {
+		{"v4",
+			"New: Alliance home worlds. Every alliance can now claim a home world. Set one when you create an alliance, or change it any time in Alliance Tools, Change home world.",
+			"Your alliance's home world shows under its name in the side panel and in the scoreboard drop-down.",
+			"A gold [HW] tag appears next to an alliance in Active Battles when the fight is on its own home world.",
+			"Alliances made before this update start with no home world. An owner just needs to set it once in Alliance Tools.",
+			"If they're opted in you can now see other players' alliance symbols and your clan's leaderboard without opting in yourself. The opt-in toggles only control whether your own symbol and tiles are shared."},
+		{"v3",
+			"New: Alliance player indicators. Your alliance's symbol can float over allied players' heads so you can tell friend from foe anywhere.",
+			"Turn on Show player indicators in the Opt-In Features settings to see players from other clans. It opts you in: your name and alliance join a public roster, never your location, and you are removed the moment you turn it back off.",
+			"New: Clan leaderboards. Track your daily and weekly Grand Exchange tiles in the side panel, and turn on Clan leaderboard (also under Opt-In Features) to rank your clan for events.",
+			"The leaderboard is opt-in too: only your name, clan, and tile counts are shared, and turning it off removes you."},
+		{"v2",
+			"New: Alliances. Team up with other clans - allied tiles share one color and count as one team.",
+			"Owners and Admins of your clan can create an alliance with a passcode or join one, all from the side panel.",
+			"The clan that made the alliance can recolor it, remove clans, or disband it."},
+		{"v1",
+			"Your clan now loads instantly on login - claim right away, no more 'join a clan' first.",
+			"New: update notes like this show in Game chat when Clan Turf updates. Toggle off in settings."},
 	};
+	// The newest version's lines drive the in-game changelog (single source of truth with the history above).
+	private static final String[] UPDATE_LINES =
+			java.util.Arrays.copyOfRange(CHANGELOG[0], 1, CHANGELOG[0].length);
 
 	/** Set when we log in with an unseen update; the changelog fires on the next game tick, since chat
 	 *  isn't ready at the state-change event itself. */
@@ -426,6 +446,7 @@ public class ClanTurfPlugin extends Plugin
 		panel.setAllianceIconLookup(serverStore::allianceIconByDisplay);
 		panel.setAllianceRosterLookup(serverStore::allianceMembersByDisplay);
 		panel.setAllianceHomeWorldLookup(serverStore::allianceHomeWorldByDisplay);
+		panel.setChangelog(changelogHtml());
 		panel.setAllianceOwnerHandlers(this::kickAllianceClan, this::changeAllianceName,
 				this::changeAlliancePasscode, this::changeAllianceIcon, this::changeAllianceHomeWorld);
 		panel.setSlug(config.fullSlug());
@@ -1774,6 +1795,48 @@ public class ClanTurfPlugin extends Plugin
 			sb.append("<br>").append(gold).append("* ").append(line);
 		}
 		return sb.toString();
+	}
+
+	/** The whole version history as HTML for the side panel's "What's New" dialog (newest version first),
+	 *  so anyone who missed a login changelog can read every past update. */
+	private static String changelogHtml()
+	{
+		StringBuilder sb = new StringBuilder("<html><body style='color:#c8c8c8; font-family:sans-serif'>");
+		for (String[] ver : CHANGELOG)
+		{
+			sb.append("<div style='color:#ff981f'><b>").append(ver[0]).append("</b></div>");
+			for (int i = 1; i < ver.length; i++)
+			{
+				sb.append("&nbsp;&nbsp;&#8226; ").append(styleChangelogLine(ver[i])).append("<br>");
+			}
+			sb.append("<br>");
+		}
+		return sb.append("</body></html>").toString();
+	}
+
+	private static String htmlEscape(String s)
+	{
+		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+	}
+
+	/** Escapes a changelog line, then adds accents: bold the "New: <feature>." lead-in, and paint the
+	 *  [HW] tag the same gold it wears in the side panel, so the notes pop the way the sidebar does. */
+	private static String styleChangelogLine(String s)
+	{
+		String line = htmlEscape(s);
+		if (line.startsWith("New:"))
+		{
+			int dot = line.indexOf(". ");
+			if (dot > 0)
+			{
+				line = "<b>" + line.substring(0, dot + 1) + "</b>" + line.substring(dot + 1);
+			}
+			else
+			{
+				line = "<b>" + line + "</b>";
+			}
+		}
+		return line.replace("[HW]", "<span style='color:#ffd700'><b>[HW]</b></span>");
 	}
 
 	/**
