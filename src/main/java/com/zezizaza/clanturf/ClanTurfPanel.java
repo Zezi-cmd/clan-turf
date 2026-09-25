@@ -190,6 +190,11 @@ class ClanTurfPanel extends PluginPanel
 	private String battlesBase = "Active battles";
 	private final StyledButton clearOfflineBtn = new StyledButton("Clear all tiles", 30);
 	private final StyledButton serverToggleBtn = new StyledButton("Online", 30);
+	// Community Discord invite. Replace the placeholder once the server exists; the button stays disabled
+	// ("coming soon") until it's a real invite, so we never ship a dead link.
+	private static final String DISCORD_INVITE = "https://discord.gg/CC22jqANmn";
+	// RuneLite's own bundled Discord icon (absolute classpath) - reused so we don't ship our own.
+	private static final String DISCORD_ICON_RESOURCE = "/net/runelite/client/plugins/info/discord_icon.png";
 	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
 	private final ColorPickerManager colorPickerManager;
 	private final BiConsumer<String, Color> onClanColorChosen; // (clan, chosen color) -> plugin persists
@@ -485,6 +490,8 @@ class ClanTurfPanel extends PluginPanel
 		controls.setBorder(BorderFactory.createEmptyBorder(2, 0, 8, 0));
 		controls.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
 		controls.add(serverToggleBtn);
+		controls.add(Box.createHorizontalStrut(6));
+		controls.add(discordButton());
 		controls.add(Box.createHorizontalGlue());
 
 		top.add(header);
@@ -878,6 +885,80 @@ class ClanTurfPanel extends PluginPanel
 		return b;
 	}
 
+	/** Small Discord icon next to the Online/Offline toggle; opens the community invite in the browser.
+	 *  Reuses RuneLite's own bundled Discord icon and renders it the way RuneLite does - a bare icon label,
+	 *  no button chrome or border - that brightens on hover. Falls back to a text label if the icon is gone,
+	 *  and stays a dimmed no-op until DISCORD_INVITE is a real invite URL. */
+	private static JComponent discordButton()
+	{
+		final boolean ready = !DISCORD_INVITE.contains("YOUR_INVITE");
+		// Load RuneLite's icon defensively: only when it exists, swallowing any error - loadImageResource
+		// THROWS on a missing/renamed resource, which would take down startUp and auto-disable the plugin.
+		BufferedImage img = null;
+		if (ClanTurfPanel.class.getResource(DISCORD_ICON_RESOURCE) != null)
+		{
+			try
+			{
+				img = ImageUtil.loadImageResource(ClanTurfPanel.class, DISCORD_ICON_RESOURCE);
+			}
+			catch (RuntimeException ex)
+			{
+				img = null;
+			}
+		}
+
+		if (img == null)
+		{
+			// Text fallback - never the pencil.
+			JButton b = new JButton("Discord");
+			b.setFont(FontManager.getRunescapeSmallFont());
+			b.setFocusable(false);
+			b.setMargin(new Insets(2, 6, 2, 6));
+			b.setEnabled(ready);
+			b.setToolTipText(ready ? "Join the Clan Turf Discord" : "Discord coming soon");
+			Dimension d = new Dimension(64, 30);
+			b.setPreferredSize(d);
+			b.setMinimumSize(d);
+			b.setMaximumSize(d);
+			b.addActionListener(e -> LinkBrowser.browse(DISCORD_INVITE));
+			return b;
+		}
+
+		// Resting icon: dimmed a little when live (brightens on hover), or a flat gray when there's no invite
+		// yet. Hover icon is the full-brightness original. No border, no button fill - just the icon.
+		final ImageIcon restIcon = new ImageIcon(ready ? ImageUtil.luminanceOffset(img, -60)
+				: ImageUtil.grayscaleImage(img));
+		final ImageIcon hoverIcon = new ImageIcon(img);
+		JLabel label = new JLabel(restIcon);
+		label.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+		label.setToolTipText(ready ? "Join the Clan Turf Discord" : "Discord coming soon");
+		if (ready)
+		{
+			label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			label.addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseEntered(MouseEvent e)
+				{
+					label.setIcon(hoverIcon);
+				}
+
+				@Override
+				public void mouseExited(MouseEvent e)
+				{
+					label.setIcon(restIcon);
+				}
+
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					LinkBrowser.browse(DISCORD_INVITE);
+				}
+			});
+		}
+		return label;
+	}
+
 	/** Fallback pencil, drawn only if the native RuneLite edit icon resource can't be found. */
 	private static Icon makePencilIcon()
 	{
@@ -958,6 +1039,7 @@ class ClanTurfPanel extends PluginPanel
 		battlesBox.setVisible(in && !battlesCollapsed);
 		allianceHeader.setVisible(in);
 		allianceBody.setVisible(in && !allianceCollapsed);
+		renderLeaderboard(); // hide/show the leaderboard section with the rest on login/logout
 	}
 
 	/**
@@ -1741,8 +1823,12 @@ class ClanTurfPanel extends PluginPanel
 				.reversed()
 				.thenComparing(e -> e.name == null ? "" : e.name.toLowerCase()));
 
+		// Leaderboard hides at the login screen along with everything else - it needs a live session, not just
+		// server mode, to show. Gated on signedIn too, and signedIn is in the signature so logout re-renders.
+		boolean lbShow = leaderboardOnline && signedIn;
+
 		StringBuilder sig = new StringBuilder();
-		sig.append(leaderboardOnline).append('|').append(leaderboardCollapsed).append('|').append(lbSort)
+		sig.append(lbShow).append('|').append(leaderboardCollapsed).append('|').append(lbSort)
 				.append('|').append(lbDaily).append('|').append(lbWeekly).append('|').append(lbOptedIn)
 				.append('|').append(lbReady).append('|').append(lbMyName).append('|').append(lbClanName)
 				.append('|').append(lbDayWinner).append('|').append(lbWeekWinner);
@@ -1758,11 +1844,11 @@ class ClanTurfPanel extends PluginPanel
 		}
 		lastLbSig = s;
 
-		leaderboardHeader.setVisible(leaderboardOnline);
-		leaderboardBox.setVisible(leaderboardOnline); // box stays visible online; collapse hides only the board part
+		leaderboardHeader.setVisible(lbShow);
+		leaderboardBox.setVisible(lbShow); // box stays visible online; collapse hides only the board part
 		leaderboardHeader.setText("Leaderboards" + (leaderboardCollapsed ? "  ▸" : "  ▾"));
 		leaderboardBox.removeAll();
-		if (!leaderboardOnline)
+		if (!lbShow)
 		{
 			leaderboardBox.revalidate();
 			leaderboardBox.repaint();
