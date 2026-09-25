@@ -138,8 +138,7 @@ class ClanTurfPanel extends PluginPanel
 	private final JPanel allianceOwnSwatch = new JPanel();  // holds the current alliance color (picker seed)
 	private static final int ALLIANCE_MAX_WORDS = 2;     // name shape: up to 2 words...
 	private static final int ALLIANCE_MAX_WORD_LEN = 10; // ...each up to 10 characters, so it fits everywhere
-	private static final int BATTLE_NAME_CLIP = 12;      // clip names in a single-line Active-battles row
-	private static final int BATTLE_VS_CLIP = 10;        // tighter clip for the two-column current-world matchup
+	private static final int BATTLE_NAME_CLIP = 12;      // clip names in an Active-battles row
 	private final JTextField nameField = new JTextField();
 	private final JLabel allianceNameLabel = new JLabel();
 	private final JTextField createPass = new JTextField();
@@ -1489,61 +1488,24 @@ class ClanTurfPanel extends PluginPanel
 	private FadePanel battleRow(ClanTurfBattle b, String myClan, int currentWorld)
 	{
 		FadePanel row = new FadePanel(new BorderLayout(6, 0));
-		boolean current = b.getWorld() == currentWorld; // the world you're on: larger text
-		// Every row gets a left accent bar in the owning clan's color (a quick "who holds this world"
-		// cue), with a divider underneath.
-		javax.swing.border.Border divider =
-				BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.MEDIUM_GRAY_COLOR);
+		boolean current = b.getWorld() == currentWorld; // the world you're on: marked by a colored underline
+		// Every row gets a left accent bar in the owning clan's color. The active world is called out the same
+		// way underneath - a thicker underline in the owner's color instead of the usual grey divider - so it
+		// stands out without being a different size from the rest.
+		Color accentColor = ClanTurfColors.forClan(b.getOwner());
+		javax.swing.border.Border divider = BorderFactory.createMatteBorder(0, 0, current ? 2 : 1, 0,
+				current ? accentColor : ColorScheme.MEDIUM_GRAY_COLOR);
 		javax.swing.border.Border accent =
-				BorderFactory.createMatteBorder(0, 3, 0, 0, ClanTurfColors.forClan(b.getOwner()));
+				BorderFactory.createMatteBorder(0, 3, 0, 0, accentColor);
 		row.setBorder(BorderFactory.createCompoundBorder(divider,
 				BorderFactory.createCompoundBorder(accent,
 						BorderFactory.createEmptyBorder(5, 5, 5, 0))));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-				b.getRunnerUp() != null ? (current ? 58 : 46) : (current ? 34 : 30)));
+				b.getRunnerUp() != null ? 46 : 30));
 
 		String ownerHex = hex(ClanTurfColors.forClan(b.getOwner()));
 
-		if (current)
-		{
-			// Active world: world tag pinned left, the matchup left-aligned right beside it.
-			// [HW] sits next to the world number so it never offsets the name.
-			String hwWorld = isHomeBattle(b) ? "&nbsp;&nbsp;<span style='color:#ffd700'>[HW]</span>" : "";
-			JLabel worldLabel = new JLabel("<html><b>W" + b.getWorld() + "</b>" + hwWorld + "</html>");
-			worldLabel.setFont(FontManager.getRunescapeFont());
-			worldLabel.setForeground(Color.WHITE);
-			row.add(worldLabel, BorderLayout.WEST);
-
-			String ownerName = "<span style='color:#" + ownerHex + "'>"
-					+ escape(clip(b.getOwner(), BATTLE_VS_CLIP)) + "</span>";
-			String matchup;
-			if (b.getRunnerUp() != null)
-			{
-				// Each clan and its tile count are centered in one column, so the clan name sits
-				// directly above its tiles, with the "vs" between the two columns.
-				String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
-				String upName = "<span style='color:#" + upHex + "'>"
-						+ escape(clip(b.getRunnerUp(), BATTLE_VS_CLIP)) + "</span>";
-				matchup = "<html><table cellpadding=0 cellspacing=0>"
-						+ "<tr><td align='center'>" + ownerName + "</td><td>&nbsp;vs&nbsp;</td>"
-						+ "<td align='center'>" + upName + "</td></tr>"
-						+ "<tr><td align='center'>" + b.getOwnerTiles() + tileWord(b.getOwnerTiles())
-						+ "</td><td></td><td align='center'>" + b.getRunnerUpTiles()
-						+ tileWord(b.getRunnerUpTiles()) + "</td></tr></table></html>";
-			}
-			else
-			{
-				matchup = "<html>" + ownerName + "&nbsp;" + b.getOwnerTiles()
-						+ tileWord(b.getOwnerTiles()) + "</html>";
-			}
-			JLabel matchupLabel = new JLabel(matchup);
-			matchupLabel.setFont(FontManager.getRunescapeFont());
-			matchupLabel.setForeground(Color.WHITE);
-			matchupLabel.setHorizontalAlignment(JLabel.LEFT);
-			row.add(matchupLabel, BorderLayout.CENTER);
-			return row;
-		}
 
 		// Other worlds: world (+ [HW]) and the clan name(s) on the left with the "vs" between the two names;
 		// the tile counts go in a separate right-aligned EAST label so they line up in a column down the list
@@ -1602,10 +1564,6 @@ class ClanTurfPanel extends PluginPanel
 		return String.format("%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
 	}
 
-	private static String tileWord(int n)
-	{
-		return n == 1 ? " tile" : " tiles";
-	}
 
 	/** Shorten a clan/alliance name with a trailing ellipsis so an Active-battles row can't overflow the
 	 *  panel and clip. The scoreboard drawer and world map still show the full name. */
