@@ -188,6 +188,8 @@ final class GrandExchangeArea
 	private static final Set<Integer> REGION_IDS;
 	private static final WorldPoint[] BOUNDARY;
 	private static final List<WorldPoint> FILLER_LIST;
+	/** Filler tiles as packed (x,y) keys, for an O(1) claimable check in the hot claim path. */
+	private static final Set<Long> FILLER_SET;
 	/** Each gap tile's poke-in triangle plus the two interior tiles whose claim should reveal it. */
 	private static final List<GapFill> GAP_FILLS;
 	private static final int MIN_X;
@@ -229,11 +231,14 @@ final class GrandExchangeArea
 		// filler; this is the denominator for a clan's GE share, so 100% means "all the ground you can
 		// actually claim", not "every tile inside the wall".
 		List<WorldPoint> fillerList = new ArrayList<>(FILLER_TILES.length);
+		Set<Long> fillerSet = new HashSet<>(FILLER_TILES.length * 2);
 		for (int[] t : FILLER_TILES)
 		{
 			fillerList.add(new WorldPoint(t[0], t[1], PLANE));
+			fillerSet.add(packXy(t[0], t[1]));
 		}
 		FILLER_LIST = fillerList;
+		FILLER_SET = fillerSet;
 		WALKABLE_COUNT = count - fillerList.size();
 
 		// Precompute each gap tile's poke-in triangle: the poke corner (inside the wall) plus its two
@@ -393,6 +398,22 @@ final class GrandExchangeArea
 	static boolean contains(int x, int y)
 	{
 		return inPolygon(x, y);
+	}
+
+	/**
+	 * @return true if the tile is a claimable walkable tile: inside the boundary AND not one of the unwalkable
+	 *         filler tiles. The two trapdoor/shortcut tiles are filler, so a player who reaches one via the
+	 *         shortcut does not claim it - it fills cosmetically from a claimed neighbor like any other pocket.
+	 */
+	static boolean claimable(WorldPoint wp)
+	{
+		return contains(wp) && !FILLER_SET.contains(packXy(wp.getX(), wp.getY()));
+	}
+
+	/** Packs a tile's (x, y) into one long key for set membership. */
+	private static long packXy(int x, int y)
+	{
+		return ((long) x << 32) | (y & 0xffffffffL);
 	}
 
 	/** Walkable (claimable) tiles - interior minus the unwalkable filler - the denominator for GE share. */

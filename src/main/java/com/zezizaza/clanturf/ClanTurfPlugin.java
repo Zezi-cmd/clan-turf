@@ -70,7 +70,6 @@ import net.runelite.client.game.ChatIconManager;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.game.WorldService;
 import net.runelite.client.events.ConfigChanged;
-import net.runelite.client.events.OverlayMenuClicked;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -102,7 +101,6 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ClanTurfOverlay overlay;
 	@Inject private ClanTurfMinimapOverlay minimapOverlay;
 	@Inject private ClanTurfResetOverlay resetOverlay;
-	@Inject private ClanTurfTrackerOverlay trackerOverlay;
 	@Inject private ClanTurfWorldMapOverlay worldMapOverlay;
 	@Inject private ClanTurfBarkOverlay barkOverlay;
 	@Inject private ClanTurfAllianceOverlay allianceOverlay;
@@ -119,7 +117,7 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Claims for the current world, refreshed on claim/world change. Read by the overlay. */
 	private volatile List<ClanTurfPoint> visibleClaims = Collections.emptyList();
-	/** Whether the player is near the GE right now, so overlays (the TPH tracker) can fade on it. */
+	/** Whether the player is near the GE right now, so overlays can fade on it. */
 	private volatile boolean nearGeNow;
 
 	private WorldPoint lastTile;
@@ -328,16 +326,7 @@ public class ClanTurfPlugin extends Plugin
 	private java.util.List<String> cachedBlacklist = java.util.Collections.emptyList(); // owner clan: blocked
 	private long lastOwnerInfoMs;     // throttle: refetch owner-info (passcode + blacklist) at most every 20s
 
-	/** Tiles-per-hour tracker: every claim this session (each new tile you step onto, retakes
-	 * included), the timestamp of the first claim, and a once-per-second cached rate so the
-	 * on-screen number ticks instead of scrolling every frame. */
-	private int sessionClaims;
-	private long firstClaimMs;
-	private int cachedRate;
-	private long rateCalcMs;
-	private int maxRate;
-
-	/** Leaderboard tile counters: persistent daily/weekly totals (separate from the session tracker above),
+	/** Leaderboard tile counters: persistent daily/weekly totals,
 	 * with the UTC day and Monday-week they belong to so they roll over to 0 on their own at the boundary. */
 	private int lbDaily;
 	private int lbWeekly;
@@ -410,6 +399,14 @@ public class ClanTurfPlugin extends Plugin
 	private volatile Color animFrom;
 	private volatile Color animTo;
 
+	// Full-board ("FULLY CLAIMED") state: fire once when a claim steps the owner up to all 2210 tiles, then
+	// don't fire again until the board drops FULL_CLAIM_REARM_GAP tiles below full - so a last-tile tug-of-war
+	// can't spam it. fullClaimOwned is the owner's count last tick; a login/reload jumps straight to full
+	// (not a near-full -> full step) so it never fires on arrival.
+	private static final int FULL_CLAIM_REARM_GAP = 25;
+	private boolean fullClaimArmed = true;
+	private int fullClaimOwned = -1; // owner's tile count sampled last tick at the GE; -1 = not sampled yet
+
 	@Provides
 	ClanTurfConfig provideConfig(ConfigManager cm)
 	{
@@ -444,7 +441,6 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.add(overlay);
 		overlayManager.add(minimapOverlay);
 		overlayManager.add(resetOverlay);
-		overlayManager.add(trackerOverlay);
 		overlayManager.add(worldMapOverlay);
 		overlayManager.add(barkOverlay);
 		overlayManager.add(allianceOverlay);
@@ -485,7 +481,6 @@ public class ClanTurfPlugin extends Plugin
 		overlayManager.remove(overlay);
 		overlayManager.remove(minimapOverlay);
 		overlayManager.remove(resetOverlay);
-		overlayManager.remove(trackerOverlay);
 		overlayManager.remove(worldMapOverlay);
 		overlayManager.remove(barkOverlay);
 		overlayManager.remove(allianceOverlay);
@@ -809,24 +804,6 @@ public class ClanTurfPlugin extends Plugin
 	}
 
 	@Subscribe
-	public void onOverlayMenuClicked(OverlayMenuClicked event)
-	{
-		if (event.getOverlay() != trackerOverlay)
-		{
-			return;
-		}
-		String option = event.getEntry().getOption();
-		if ("Reset run".equals(option))
-		{
-			resetTileRun();
-		}
-		else if ("Reset all".equals(option))
-		{
-			resetTileAll();
-		}
-	}
-
-	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		// Logging in or hopping resets where we think the player is.
@@ -978,10 +955,12 @@ public class ClanTurfPlugin extends Plugin
 		if (nearGe)
 		{
 			updateLeader();
+			checkFullClaim();
 		}
 		else
 		{
 			leaderInit = false;
+			fullClaimOwned = -1; // forget the last sample so returning to the GE can't read a false step-up
 		}
 		checkGlobalTakeover(nearGe);
 
@@ -1147,7 +1126,10 @@ public class ClanTurfPlugin extends Plugin
 			return;
 		}
 
-		if (!GrandExchangeArea.contains(wp))
+		// claimable() excludes the unwalkable filler tiles (including the two trapdoor/shortcut tiles a player
+		// can physically stand on): those are never claimed, counted, or synced - they fill cosmetically from a
+		// claimed neighbor. contains() alone would let a shortcut-reached filler tile write a real claim.
+		if (!GrandExchangeArea.claimable(wp))
 		{
 			return;
 		}
@@ -1200,16 +1182,11 @@ public class ClanTurfPlugin extends Plugin
 		log.debug("Claimed {},{} plane {} for {} on world {}",
 				wp.getRegionX(), wp.getRegionY(), wp.getPlane(), clanName, world);
 
-		// Tiles/hour tracker: count genuine gains only - a fresh or stolen tile, the same 'gain' rule the
-		// community counter uses - so dancing on your own turf doesn't inflate it. Full Slug is a drawing
-		// tool, not a run, so it never touches the numbers either (and the tracker is hidden while it's on).
+		// Leaderboard tile counters: count genuine gains only - a fresh or stolen tile, the same 'gain' rule
+		// the community counter uses - so dancing on your own turf doesn't inflate it. Full Slug is a drawing
+		// tool, not a run, so it never touches the numbers either.
 		if (gain && !isSlugPainting())
 		{
-			sessionClaims++;
-			if (firstClaimMs == 0L)
-			{
-				firstClaimMs = System.currentTimeMillis();
-			}
 			recordLeaderboardTile();
 		}
 	}
@@ -1382,60 +1359,6 @@ public class ClanTurfPlugin extends Plugin
 			return java.util.Collections.emptyList();
 		}
 		return store.getLeaderboard(clan);
-	}
-
-	/** Claims made this session, retakes included (for the tiles/hour tracker overlay). */
-	int getSessionTiles()
-	{
-		return sessionClaims;
-	}
-
-	/** Session claim rate in tiles per hour, cached to once a second so the readout doesn't flicker. */
-	int getTilesPerHour()
-	{
-		if (sessionClaims == 0 || firstClaimMs == 0L)
-		{
-			return 0;
-		}
-		long now = System.currentTimeMillis();
-		long elapsed = now - firstClaimMs;
-		if (elapsed < 3000L)
-		{
-			return cachedRate; // brief warm-up so the first claims don't spike the rate sky-high
-		}
-		if (now - rateCalcMs >= 1000L)
-		{
-			// Recompute at most once a second so the on-screen number ticks instead of scrolling.
-			cachedRate = (int) Math.round(sessionClaims * 3_600_000.0 / elapsed);
-			rateCalcMs = now;
-			if (cachedRate > maxRate)
-			{
-				maxRate = cachedRate;
-			}
-		}
-		return cachedRate;
-	}
-
-	/** Highest tiles-per-hour rate seen this session (for the tracker's "Max TPH" line). */
-	int getMaxTilesPerHour()
-	{
-		return maxRate;
-	}
-
-	/** Reset the run only: zero Claimed and Current TPH but keep Max TPH ("Reset run" on the tracker). */
-	void resetTileRun()
-	{
-		sessionClaims = 0;
-		firstClaimMs = 0L;
-		cachedRate = 0;
-		rateCalcMs = 0L;
-	}
-
-	/** Full wipe including Max TPH, matching a fresh client start ("Reset all" on the tracker). */
-	void resetTileAll()
-	{
-		resetTileRun();
-		maxRate = 0;
 	}
 
 	/** Tiles the overlay should paint right now (current world). */
@@ -3194,6 +3117,83 @@ public class ClanTurfPlugin extends Plugin
 				+ on + "Grand Exchange" + RESET + WHITE + " on " + RESET
 				+ on + "World " + client.getWorld() + RESET + WHITE + " belongs to " + RESET
 				+ on + name + RESET + WHITE + "!" + RESET;
+		announceClan(msg);
+	}
+
+	/**
+	 * Detects a full board - one owner holding all 2210 GE tiles - and fires the takeover animation (walls
+	 * rising, tiles shimmering, but in the owner's own color since ownership didn't change) plus a
+	 * "FULLY CLAIMED" callout. Hysteresis (re-arm only after the board drops a real margin below full) keeps
+	 * a last-tile tug-of-war from spamming it; the current state is adopted silently the first tick back.
+	 */
+	private void checkFullClaim()
+	{
+		int total = GrandExchangeArea.totalTiles();
+		int prev = fullClaimOwned; // owner's count last tick; a step from near-full to full is what fires
+
+		// Cheap O(1) reject: unless nearly every GE tile is claimed, no single owner is near full, so re-arm,
+		// record a low count, and skip the per-owner scan. Only a near-full GE pays for the count below.
+		if (visibleClaims.size() < total - FULL_CLAIM_REARM_GAP)
+		{
+			fullClaimArmed = true;
+			fullClaimOwned = 0;
+			return;
+		}
+
+		String leader = committedLeader;
+		int owned = 0;
+		if (leader != null)
+		{
+			for (ClanTurfPoint p : aggregatedClaims())
+			{
+				if (leader.equalsIgnoreCase(p.getClanName()))
+				{
+					owned++;
+				}
+			}
+		}
+		fullClaimOwned = owned;
+		boolean full = leader != null && owned >= total;
+
+		// Re-arm once the board drops a real margin below full.
+		if (owned <= total - FULL_CLAIM_REARM_GAP)
+		{
+			fullClaimArmed = true;
+		}
+
+		// Fire only on a genuine last-tile completion: the previous sample was already near-full (so this is
+		// an actual claim finishing the board, NOT a login/reload jumping straight to 2210) and it just
+		// stepped up to a full board. Armed guards against a last-tile tug-of-war re-firing.
+		if (full && fullClaimArmed && prev >= total - FULL_CLAIM_REARM_GAP && prev < total)
+		{
+			fullClaimArmed = false;
+			onFullClaim(leader);
+		}
+	}
+
+	/** Plays the boundary/shimmer animation in the owner's own color (no ownership change) and announces it. */
+	private void onFullClaim(String owner)
+	{
+		Color c = ClanTurfColors.forClan(owner);
+		animFrom = c;
+		animTo = c; // same color both ends: the wall rises and settles without a color flip
+		animStartMs = System.currentTimeMillis();
+		announceFullClaim(owner);
+		fireTakeoverSound(); // reuse the takeover cue (gated by the Takeover sound / volume settings)
+		log.debug("Full claim by {} on world {}", owner, client.getWorld());
+	}
+
+	/** Posts the "[CT] X FULLY CLAIMED World N!" callout in the clan tab (reuses the takeover toggle). */
+	private void announceFullClaim(String owner)
+	{
+		if (owner == null || !config.announceTakeovers())
+		{
+			return;
+		}
+		String on = "<col=" + hex(ClanTurfColors.forClan(owner)) + ">";
+		String name = owner.toUpperCase(java.util.Locale.ROOT);
+		String msg = on + "[CT]" + RESET + " " + on + name + RESET + WHITE + " FULLY CLAIMED " + RESET
+				+ on + "World " + client.getWorld() + RESET + WHITE + "!" + RESET;
 		announceClan(msg);
 	}
 
