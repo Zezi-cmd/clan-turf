@@ -37,6 +37,8 @@ import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.Point;
+import net.runelite.api.Varbits;
+import net.runelite.api.WorldType;
 import net.runelite.api.clan.ClanChannel;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.overlay.Overlay;
@@ -84,13 +86,22 @@ class ClanTurfAllianceOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		// One time-based fade covering both opting in/out and GE proximity, so nothing pops. Target is
-		// visible when indicators are on and - if "Hide indicators outside GE" is set - you are near the GE.
+		// One time-based fade covering GE proximity, so nothing pops. Anyone sees opted-in players' symbols
+		// (viewing is not gated on your own opt-in); "Show player indicators" only controls whether YOU are
+		// published. Target is visible unless "Hide indicators outside GE" is set and you are away from it.
+		// Never draw overhead player info in a PVP area - the Wilderness, PVP/Deadman worlds, or the PVP Arena.
+		// Jagex's rules forbid surfacing extra information about other players for the purpose of scouting PVP
+		// targets, so we hard-cut the symbols (and names) there regardless of settings. Clan Turf is a GE tool;
+		// this costs nothing in normal use and keeps us inside the rules.
+		if (inPvpArea())
+		{
+			fade = 0.0;
+			return null;
+		}
 		long nowMs = System.currentTimeMillis();
 		double dt = lastRenderMs == 0 ? 16.0 : Math.min(200.0, nowMs - lastRenderMs);
 		lastRenderMs = nowMs;
-		boolean visible = config.showPlayerIndicators()
-				&& (plugin.isNearGe() || !config.hideIndicatorsOutsideGe());
+		boolean visible = plugin.isNearGe() || !config.hideIndicatorsOutsideGe();
 		fade = Math.max(0.0, Math.min(1.0, fade + (visible ? dt : -dt) / FADE_MS));
 		if (fade <= 0.0)
 		{
@@ -222,6 +233,34 @@ class ClanTurfAllianceOverlay extends Overlay
 			return true;
 		}
 		return self != null && self.getTeam() > 0 && p.getTeam() == self.getTeam();
+	}
+
+	// Any world where players can fight - so overhead player info could be used to scout opponents. PVP and
+	// Deadman are also covered by WorldType.isPvpWorld, but High Risk carries its own flag (can be set without
+	// PVP), and Bounty Hunter / LMS / PVP Arena are all combat worlds. Hidden on all of them, plus Wilderness.
+	private static final java.util.EnumSet<WorldType> COMBAT_WORLDS = java.util.EnumSet.of(
+			WorldType.PVP, WorldType.DEADMAN, WorldType.HIGH_RISK, WorldType.BOUNTY,
+			WorldType.PVP_ARENA, WorldType.LAST_MAN_STANDING);
+
+	/**
+	 * True in any PVP context where surfacing player info would break Jagex's anti-scouting rule: the
+	 * Wilderness, or any combat world (PVP, Deadman, High Risk, Bounty Hunter, PVP Arena, Last Man Standing).
+	 * Overhead symbols and names are suppressed there.
+	 */
+	private boolean inPvpArea()
+	{
+		if (client.getVarbitValue(Varbits.IN_WILDERNESS) == 1)
+		{
+			return true;
+		}
+		for (WorldType t : client.getWorldType())
+		{
+			if (COMBAT_WORLDS.contains(t))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Null on a malformed hex, else the alliance's shared color. */
