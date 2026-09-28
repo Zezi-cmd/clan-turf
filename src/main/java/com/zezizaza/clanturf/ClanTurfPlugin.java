@@ -49,6 +49,7 @@ import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.GameState;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
@@ -67,6 +68,7 @@ import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ChatIconManager;
 import net.runelite.client.game.SpriteManager;
+import net.runelite.client.game.WorldService;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
@@ -93,6 +95,7 @@ public class ClanTurfPlugin extends Plugin
 	@Inject private ColorPickerManager colorPickerManager;
 	@Inject private SpriteManager spriteManager;
 	@Inject private ChatIconManager chatIconManager;
+	@Inject private WorldService worldService;
 	@Inject private ConfigManager configManager;
 	@Inject private ClanTurfConfig config;
 	@Inject private ClanTurfOverlay overlay;
@@ -291,19 +294,40 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v3";
+	private static final String UPDATE_ID = "v4";
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
 	private static final boolean ALWAYS_SHOW_UPDATE = false;
 	/** Header label. Kept as "[Update]" for now. Set to null in a future release to auto-use the
 	 *  Hub-built jar version instead (see updateMessage()). */
 	private static final String UPDATE_LABEL = "[Update]";
-	private static final String[] UPDATE_LINES = {
-		"New: Alliance player indicators. Your alliance's symbol can float over allied players' heads so you can tell friend from foe anywhere.",
-		"Turn on Show player indicators in the Opt-In Features settings to see players from other clans. It opts you in: your name and alliance join a public roster, never your location, and you are removed the moment you turn it back off.",
-		"New: Clan leaderboards. Track your daily and weekly Grand Exchange tiles in the side panel, and turn on Clan leaderboard (also under Opt-In Features) to rank your clan for events.",
-		"The leaderboard is opt-in too: only your name, clan, and tile counts are shared, and turning it off removes you.",
+	/** Full version history, newest first. Element [0] of each row is the version tag; the rest are that
+	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
+	 *  all of them, so anyone who missed a login message can still read the history. */
+	private static final String[][] CHANGELOG = {
+		{"v4",
+			"New: Alliance home worlds. Every alliance can now claim a home world. Set one when you create an alliance, or change it any time in Alliance Tools, Change home world.",
+			"Your alliance's home world shows under its name in the side panel and in the scoreboard drop-down.",
+			"A gold [HW] tag appears next to an alliance in Active Battles when the fight is on its own home world.",
+			"Alliances made before this update start with no home world. An owner just needs to set it once in Alliance Tools.",
+			"If they're opted in you can now see other players' alliance symbols and your clan's leaderboard without opting in yourself. The opt-in toggles only control whether your own symbol and tiles are shared.",
+			"New: Join the Clan Turf community server! Click the Discord icon next to the Online button to join."},
+		{"v3",
+			"New: Alliance player indicators. Your alliance's symbol can float over allied players' heads so you can tell friend from foe anywhere.",
+			"Turn on Show player indicators in the Opt-In Features settings to see players from other clans. It opts you in: your name and alliance join a public roster, never your location, and you are removed the moment you turn it back off.",
+			"New: Clan leaderboards. Track your daily and weekly Grand Exchange tiles in the side panel, and turn on Clan leaderboard (also under Opt-In Features) to rank your clan for events.",
+			"The leaderboard is opt-in too: only your name, clan, and tile counts are shared, and turning it off removes you."},
+		{"v2",
+			"New: Alliances. Team up with other clans - allied tiles share one color and count as one team.",
+			"Owners and Admins of your clan can create an alliance with a passcode or join one, all from the side panel.",
+			"The clan that made the alliance can recolor it, remove clans, or disband it."},
+		{"v1",
+			"Your clan now loads instantly on login - claim right away, no more 'join a clan' first.",
+			"New: update notes like this show in Game chat when Clan Turf updates. Toggle off in settings."},
 	};
+	// The newest version's lines drive the in-game changelog (single source of truth with the history above).
+	private static final String[] UPDATE_LINES =
+			java.util.Arrays.copyOfRange(CHANGELOG[0], 1, CHANGELOG[0].length);
 
 	/** Set when we log in with an unseen update; the changelog fires on the next game tick, since chat
 	 *  isn't ready at the state-change event itself. */
@@ -317,6 +341,7 @@ public class ClanTurfPlugin extends Plugin
 	private final Set<String> allianceApplied = new HashSet<>();
 	private Map<String, String> lastAllianceColors = java.util.Collections.emptyMap();
 	private Map<String, String> lastAllianceNames = java.util.Collections.emptyMap(); // detect a rename (colors miss it)
+	private Map<String, Integer> lastAllianceHomes = java.util.Collections.emptyMap(); // detect a home-world change
 	private String cachedPasscode;    // owner clan only: the alliance passcode (refetched on a throttle)
 	private String cachedPasscodeAid; // the alliance id the cached passcode/blacklist belong to
 	private java.util.List<String> cachedBlacklist = java.util.Collections.emptyList(); // owner clan: blocked
@@ -421,8 +446,10 @@ public class ClanTurfPlugin extends Plugin
 		panel.setSpriteManager(spriteManager);
 		panel.setAllianceIconLookup(serverStore::allianceIconByDisplay);
 		panel.setAllianceRosterLookup(serverStore::allianceMembersByDisplay);
+		panel.setAllianceHomeWorldLookup(serverStore::allianceHomeWorldByDisplay);
+		panel.setChangelog(changelogHtml());
 		panel.setAllianceOwnerHandlers(this::kickAllianceClan, this::changeAllianceName,
-				this::changeAlliancePasscode, this::changeAllianceIcon);
+				this::changeAlliancePasscode, this::changeAllianceIcon, this::changeAllianceHomeWorld);
 		panel.setSlug(config.fullSlug());
 		panel.setEraser(config.eraser());
 		navButton = NavigationButton.builder()
@@ -844,7 +871,8 @@ public class ClanTurfPlugin extends Plugin
 		// Alliance data arrives on a background poll; the map reference is swapped each poll, so this
 		// re-applies the shared team colors only when the alliance set actually changed.
 		if (!store.allianceColors().equals(lastAllianceColors)
-				|| !store.allianceNames().equals(lastAllianceNames))
+				|| !store.allianceNames().equals(lastAllianceNames)
+				|| !store.allianceHomeWorlds().equals(lastAllianceHomes))
 		{
 			applyWhitelist();      // re-applies team colors and records the new alliance map
 			updateAlliancePanel(); // reflect join/leave/kick in the panel (member list, Leave button)
@@ -1770,6 +1798,48 @@ public class ClanTurfPlugin extends Plugin
 		return sb.toString();
 	}
 
+	/** The whole version history as HTML for the side panel's "What's New" dialog (newest version first),
+	 *  so anyone who missed a login changelog can read every past update. */
+	private static String changelogHtml()
+	{
+		StringBuilder sb = new StringBuilder("<html><body style='color:#c8c8c8; font-family:sans-serif'>");
+		for (String[] ver : CHANGELOG)
+		{
+			sb.append("<div style='color:#ff981f'><b>").append(ver[0]).append("</b></div>");
+			for (int i = 1; i < ver.length; i++)
+			{
+				sb.append("&nbsp;&nbsp;&#8226; ").append(styleChangelogLine(ver[i])).append("<br>");
+			}
+			sb.append("<br>");
+		}
+		return sb.append("</body></html>").toString();
+	}
+
+	private static String htmlEscape(String s)
+	{
+		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+	}
+
+	/** Escapes a changelog line, then adds accents: bold the "New: <feature>." lead-in, and paint the
+	 *  [HW] tag the same gold it wears in the side panel, so the notes pop the way the sidebar does. */
+	private static String styleChangelogLine(String s)
+	{
+		String line = htmlEscape(s);
+		if (line.startsWith("New:"))
+		{
+			int dot = line.indexOf(". ");
+			if (dot > 0)
+			{
+				line = "<b>" + line.substring(0, dot + 1) + "</b>" + line.substring(dot + 1);
+			}
+			else
+			{
+				line = "<b>" + line + "</b>";
+			}
+		}
+		return line.replace("[HW]", "<span style='color:#ffd700'><b>[HW]</b></span>");
+	}
+
 	/**
 	 * Applies the "Clan color list" overrides (any clan, including your own), local only. Clears
 	 * whatever it applied last time first (so removed entries revert to their auto color), then
@@ -1793,6 +1863,7 @@ public class ClanTurfPlugin extends Plugin
 		// all share one color.
 		lastAllianceColors = store.allianceColors();
 		lastAllianceNames = store.allianceNames();
+		lastAllianceHomes = store.allianceHomeWorlds();
 		for (Map.Entry<String, String> e : lastAllianceColors.entrySet())
 		{
 			Color col = hexColor(e.getValue());
@@ -2000,11 +2071,40 @@ public class ClanTurfPlugin extends Plugin
 			}
 		}
 		final int createIcon = icon;
+		// Home world: an explicit choice (args[4]) wins; blank falls back to the creator's clan home world.
+		// A world of 0 means neither was available, so we can't create - require one. Otherwise validate it.
+		int home = 0;
+		if (args.length > 4)
+		{
+			try
+			{
+				home = Integer.parseInt(args[4]);
+			}
+			catch (NumberFormatException ignored)
+			{
+				// fall back to the clan home world below
+			}
+		}
+		if (home == 0)
+		{
+			home = clanHomeWorld();
+		}
+		if (home == 0)
+		{
+			panel.setAllianceStatus("Set a home world (your clan has none set).");
+			return;
+		}
+		if (!worldExists(home))
+		{
+			panel.setAllianceStatus("That isn't a real world.");
+			return;
+		}
+		final int createHome = home;
 		panel.setAllianceStatus("Creating…");
 		executor.execute(() ->
 		{
 			String resp = serverStore.allianceCreate(clan, name, colorHex,
-					passcode == null || passcode.isEmpty() ? null : passcode, createIcon);
+					passcode == null || passcode.isEmpty() ? null : passcode, createIcon, createHome);
 			javax.swing.SwingUtilities.invokeLater(() ->
 			{
 				if (resp != null && resp.startsWith("ok,"))
@@ -2212,6 +2312,62 @@ public class ClanTurfPlugin extends Plugin
 		});
 	}
 
+	/** Owner clan staff: set the alliance's home world (validated against the live world list). */
+	private void changeAllianceHomeWorld(int world)
+	{
+		if (store != serverStore)
+		{
+			return;
+		}
+		String clan = effectiveClanName();
+		String aid = clan == null ? null : store.allianceIdOf(clan);
+		if (aid == null || !isOwnerClan(clan) || !canManageAlliance())
+		{
+			return;
+		}
+		if (!worldExists(world))
+		{
+			panel.setAllianceStatus("That isn't a real world.");
+			return;
+		}
+		panel.setAllianceStatus("Changing home world...");
+		executor.execute(() ->
+		{
+			String resp = serverStore.allianceSetHomeWorld(aid, clan, world);
+			javax.swing.SwingUtilities.invokeLater(() ->
+			{
+				if (resp != null && resp.startsWith("ok"))
+				{
+					panel.setAllianceStatus("Home world changed.");
+					panel.setAllianceHomeWorld(world); // show it now, don't wait on the throttled poll
+					serverStore.refreshAlliancesSoon();
+				}
+				else
+				{
+					panel.setAllianceStatus("Couldn't change home world: " + shortErr(resp));
+				}
+			});
+		});
+	}
+
+	/** This player's clan home world from the game varbit (0 if not in a clan or none set). */
+	private int clanHomeWorld()
+	{
+		return client.getVarbitValue(VarbitID.CLAN_TRANSMIT_HOMEWORLD);
+	}
+
+	/** True if the number is a real game world. If the world list hasn't loaded yet we can't verify, so we
+	 *  allow it rather than block creation on a momentary gap; the server also guards against garbage. */
+	private boolean worldExists(int world)
+	{
+		if (world <= 0)
+		{
+			return false;
+		}
+		net.runelite.http.api.worlds.WorldResult wr = worldService.getWorlds();
+		return wr == null || wr.findWorld(world) != null;
+	}
+
 	/** Owner clan staff: rename the alliance (the server runs the name filter + a one-per-week cap). */
 	private void changeAllianceName(String newName)
 	{
@@ -2297,6 +2453,7 @@ public class ClanTurfPlugin extends Plugin
 					java.util.Collections.emptyList(), java.util.Collections.emptyList());
 			panel.setAlliancePasscode(null);
 			panel.setAllianceIcon(0);
+			panel.setAllianceHomeWorld(0);
 			return;
 		}
 		java.util.List<String> members = new java.util.ArrayList<>(store.alliesOf(clan));
@@ -2315,6 +2472,7 @@ public class ClanTurfPlugin extends Plugin
 		panel.setAlliance(true, true, canManage, name, colorHex, isOwnerClan, members, kickable);
 		int icon = store.allianceIconOf(clan);
 		panel.setAllianceIcon(icon <= 0 ? 3024 : icon); // fall back to the Skull default
+		panel.setAllianceHomeWorld(store.allianceHomeWorldOf(clan));
 		// Owner clan's staff can see + copy the passcode to re-share it; joiners never see it.
 		if (isOwnerClan && canManage)
 		{
@@ -2662,7 +2820,8 @@ public class ClanTurfPlugin extends Plugin
 		// the team colors NOW, before painting. Otherwise the scoreboard shows a just-freed clan in its old
 		// alliance color for one frame until onGameTick catches up (the "flash back to purple").
 		if (!store.allianceColors().equals(lastAllianceColors)
-				|| !store.allianceNames().equals(lastAllianceNames))
+				|| !store.allianceNames().equals(lastAllianceNames)
+				|| !store.allianceHomeWorlds().equals(lastAllianceHomes))
 		{
 			applyWhitelist();
 			leaderInit = false;
