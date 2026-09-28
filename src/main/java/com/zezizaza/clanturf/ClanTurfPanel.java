@@ -229,6 +229,7 @@ class ClanTurfPanel extends PluginPanel
 	private final JPanel leaderboardBox = new JPanel();
 	private boolean leaderboardCollapsed = true; // starts collapsed; only "Your tiles" shows until expanded
 	private boolean leaderboardOnline = false;
+	private boolean helpCollapsed = true; // Help section (report / changelog / discord) starts collapsed
 
 	private enum LbSort { DAILY, WEEKLY }
 
@@ -510,30 +511,15 @@ class ClanTurfPanel extends PluginPanel
 		top.add(globalHeader);
 		top.add(globalBox);
 
-		// Feedback / bug report: opens the plugin's GitHub issue tracker in the browser. The plugin
-		// collects nothing here - reports live on GitHub, not on our server. Set in a slightly lighter
-		// box so it reads as its own footer, apart from the scoreboard above.
-		JLabel reportBlurb = new JLabel("<html><body style='width:150px'>I can't be tick-perfect all the "
-				+ "time. Found a bug with the plug? 1-tick-click that Report Button. Or check out what's "
+		// Collapsible "Help" section (collapsed by default): point people to the Discord for help/bug reports,
+		// and offer the changelog. No boxed background - it reads as a plain section header like the others.
+		JLabel helpBlurb = new JLabel("<html><body style='width:150px'>Need help or found a bug? Click the "
+				+ "Discord icon at the top of the panel to join and send us a request. Or check out what's "
 				+ "been added so far.</body></html>");
-		reportBlurb.setFont(FontManager.getRunescapeSmallFont());
-		reportBlurb.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		reportBlurb.setAlignmentX(Component.LEFT_ALIGNMENT);
+		helpBlurb.setFont(FontManager.getRunescapeSmallFont());
+		helpBlurb.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		helpBlurb.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		JButton reportBtn = new JButton("Report");
-		reportBtn.setFont(FontManager.getRunescapeFont());
-		reportBtn.setFocusable(false);
-		reportBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reportBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, reportBtn.getPreferredSize().height));
-		reportBtn.setToolTipText("Open the Clan Turf bug tracker on GitHub in your browser.");
-		reportBtn.addActionListener(e -> LinkBrowser.browse("https://github.com/Zezi-cmd/clan-turf/issues/new"));
-
-		JPanel reportBox = new JPanel();
-		reportBox.setLayout(new BoxLayout(reportBox, BoxLayout.Y_AXIS));
-		reportBox.setOpaque(true);
-		reportBox.setBackground(new Color(0x36, 0x36, 0x36)); // a touch lighter than the panel
-		reportBox.setAlignmentX(Component.LEFT_ALIGNMENT);
-		reportBox.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 		JButton whatsNewBtn = new JButton("Changelog");
 		whatsNewBtn.setFont(FontManager.getRunescapeFont());
 		whatsNewBtn.setFocusable(false);
@@ -542,11 +528,35 @@ class ClanTurfPanel extends PluginPanel
 		whatsNewBtn.setToolTipText("See every Clan Turf update note, in case you missed one in chat.");
 		whatsNewBtn.addActionListener(e -> showWhatsNew());
 
-		reportBox.add(reportBlurb);
-		reportBox.add(Box.createVerticalStrut(6));
-		reportBox.add(reportBtn);
-		reportBox.add(Box.createVerticalStrut(6));
-		reportBox.add(whatsNewBtn);
+		JPanel helpBody = new JPanel();
+		helpBody.setLayout(new BoxLayout(helpBody, BoxLayout.Y_AXIS));
+		helpBody.setOpaque(false);
+		helpBody.setAlignmentX(Component.LEFT_ALIGNMENT);
+		helpBody.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+		helpBody.add(helpBlurb);
+		helpBody.add(Box.createVerticalStrut(6));
+		helpBody.add(whatsNewBtn);
+		helpBody.setVisible(false); // collapsed by default
+
+		JLabel helpHeader = new JLabel("Help  ▸");
+		helpHeader.setFont(HEADER_FONT);
+		helpHeader.setForeground(ColorScheme.BRAND_ORANGE);
+		helpHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+		helpHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
+		helpHeader.setToolTipText("Get help on the Discord, or view the changelog.");
+		helpHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		helpHeader.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				helpCollapsed = !helpCollapsed;
+				helpBody.setVisible(!helpCollapsed);
+				helpHeader.setText(helpCollapsed ? "Help  ▸" : "Help  ▾");
+				revalidate();
+				repaint();
+			}
+		});
 
 		// Offline sandbox: creative/practice tools that only make sense with no live turf war. Hidden
 		// online; fades in when you go offline. Phase 1 is the Full Slug paint toggle.
@@ -625,7 +635,8 @@ class ClanTurfPanel extends PluginPanel
 
 		// Report sits at the very bottom in both modes (below the offline tools when they're shown).
 		top.add(Box.createVerticalStrut(20));
-		top.add(reportBox);
+		top.add(helpHeader);
+		top.add(helpBody);
 
 		add(top, BorderLayout.NORTH);
 

@@ -294,7 +294,7 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v4";
+	private static final String UPDATE_ID = "v5";
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
 	private static final boolean ALWAYS_SHOW_UPDATE = false;
@@ -305,6 +305,8 @@ public class ClanTurfPlugin extends Plugin
 	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
 	 *  all of them, so anyone who missed a login message can still read the history. */
 	private static final String[][] CHANGELOG = {
+		{"v5",
+			"Heads up: alliance overhead indicators are now hidden in the Wilderness and on PVP worlds (added in the last update), to follow Jagex's rules against scouting. We are exploring a limited opt-in way to show just the icon there, but it may stay off for good."},
 		{"v4",
 			"New: Alliance home worlds. Every alliance can now claim a home world. Set one when you create an alliance, or change it any time in Alliance Tools, Change home world.",
 			"Your alliance's home world shows under its name in the side panel and in the scoreboard drop-down.",
