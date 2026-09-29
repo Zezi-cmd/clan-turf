@@ -139,6 +139,10 @@ class ClanTurfPanel extends PluginPanel
 	private static final int ALLIANCE_MAX_WORDS = 2;     // name shape: up to 2 words...
 	private static final int ALLIANCE_MAX_WORD_LEN = 10; // ...each up to 10 characters, so it fits everywhere
 	private static final int BATTLE_NAME_CLIP = 12;      // clip names in an Active-battles row
+	// Fixed column widths shared by the Active-battles header and every row, so the sort labels always line up
+	// over their columns no matter the clan-name lengths (owner column flexes and clips instead of shifting).
+	private static final int BATTLE_WORLD_COL_W = 58;    // world number (+ gold [HW] tag) column; wide enough for "W### [HW]"
+	private static final int BATTLE_TILES_COL_W = 44;    // right-aligned tile-count column
 	private final JTextField nameField = new JTextField();
 	private final JLabel allianceNameLabel = new JLabel();
 	private final JTextField createPass = new JTextField();
@@ -195,6 +199,8 @@ class ClanTurfPanel extends PluginPanel
 	private static final String DISCORD_INVITE = "https://discord.gg/CC22jqANmn";
 	// RuneLite's own bundled Discord icon (absolute classpath) - reused so we don't ship our own.
 	private static final String DISCORD_ICON_RESOURCE = "/net/runelite/client/plugins/info/discord_icon.png";
+	// Our own 30px help "?" icon (drawn to match the Discord icon's canvas + padding), for the changelog button.
+	private static final String HELP_ICON_RESOURCE = "/com/zezizaza/clanturf/help_icon.png";
 	private final Consumer<Boolean> onSetServer; // flips the sync-server (online/offline) config
 	private final ColorPickerManager colorPickerManager;
 	private final BiConsumer<String, Color> onClanColorChosen; // (clan, chosen color) -> plugin persists
@@ -229,9 +235,6 @@ class ClanTurfPanel extends PluginPanel
 	private final JPanel leaderboardBox = new JPanel();
 	private boolean leaderboardCollapsed = true; // starts collapsed; only "Your tiles" shows until expanded
 	private boolean leaderboardOnline = false;
-	private boolean helpCollapsed = true; // Help section (changelog / discord) starts collapsed
-	private final JLabel helpHeader = new JLabel("Help  ▸");
-	private final JPanel helpBody = new JPanel();
 
 	private enum LbSort { DAILY, WEEKLY }
 
@@ -495,6 +498,8 @@ class ClanTurfPanel extends PluginPanel
 		controls.add(serverToggleBtn);
 		controls.add(Box.createHorizontalStrut(6));
 		controls.add(discordButton());
+		controls.add(Box.createHorizontalStrut(6));
+		controls.add(changelogButton());
 		controls.add(Box.createHorizontalGlue());
 
 		top.add(header);
@@ -512,52 +517,6 @@ class ClanTurfPanel extends PluginPanel
 		top.add(leaderboardBox);
 		top.add(globalHeader);
 		top.add(globalBox);
-
-		// Collapsible "Help" section (collapsed by default): point people to the Discord for help/bug reports,
-		// and offer the changelog. No boxed background - it reads as a plain section header like the others.
-		JLabel helpBlurb = new JLabel("<html><body style='width:150px'>Need help or found a bug? Click the "
-				+ "Discord icon at the top of the panel to join and send us a request. Or check out what's "
-				+ "been added so far.</body></html>");
-		helpBlurb.setFont(FontManager.getRunescapeSmallFont());
-		helpBlurb.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		helpBlurb.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		JButton whatsNewBtn = new JButton("Changelog");
-		whatsNewBtn.setFont(FontManager.getRunescapeFont());
-		whatsNewBtn.setFocusable(false);
-		whatsNewBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		whatsNewBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, whatsNewBtn.getPreferredSize().height));
-		whatsNewBtn.setToolTipText("See every Clan Turf update note, in case you missed one in chat.");
-		whatsNewBtn.addActionListener(e -> showWhatsNew());
-
-		helpBody.setLayout(new BoxLayout(helpBody, BoxLayout.Y_AXIS));
-		helpBody.setOpaque(false);
-		helpBody.setAlignmentX(Component.LEFT_ALIGNMENT);
-		helpBody.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-		helpBody.add(helpBlurb);
-		helpBody.add(Box.createVerticalStrut(6));
-		helpBody.add(whatsNewBtn);
-		helpBody.setVisible(false); // collapsed by default
-
-		helpHeader.setFont(HEADER_FONT);
-		helpHeader.setForeground(ColorScheme.BRAND_ORANGE);
-		helpHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
-		helpHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
-		helpHeader.setToolTipText("Get help on the Discord, or view the changelog.");
-		helpHeader.setVisible(false); // hidden until signed in (revealed by setSignedIn, like the other sections)
-		helpHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		helpHeader.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				helpCollapsed = !helpCollapsed;
-				helpBody.setVisible(!helpCollapsed);
-				helpHeader.setText(helpCollapsed ? "Help  ▸" : "Help  ▾");
-				revalidate();
-				repaint();
-			}
-		});
 
 		// Offline sandbox: creative/practice tools that only make sense with no live turf war. Hidden
 		// online; fades in when you go offline. Phase 1 is the Full Slug paint toggle.
@@ -636,8 +595,6 @@ class ClanTurfPanel extends PluginPanel
 
 		// Report sits at the very bottom in both modes (below the offline tools when they're shown).
 		top.add(Box.createVerticalStrut(20));
-		top.add(helpHeader);
-		top.add(helpBody);
 
 		add(top, BorderLayout.NORTH);
 
@@ -901,6 +858,65 @@ class ClanTurfPanel extends PluginPanel
 	 *  Reuses RuneLite's own bundled Discord icon and renders it the way RuneLite does - a bare icon label,
 	 *  no button chrome or border - that brightens on hover. Falls back to a text label if the icon is gone,
 	 *  and stays a dimmed no-op until DISCORD_INVITE is a real invite URL. */
+	/** The "?" button next to the Discord icon; opens the changelog. Reuses RuneLite's own plugin-hub help icon
+	 *  and renders it exactly like the Discord button (same 30px size, dimmed at rest, full-bright on hover) so
+	 *  the two read as a matching pair. Loaded defensively so a missing/renamed resource can't crash startUp. */
+	private JComponent changelogButton()
+	{
+		BufferedImage raw = null;
+		if (ClanTurfPanel.class.getResource(HELP_ICON_RESOURCE) != null)
+		{
+			try
+			{
+				raw = ImageUtil.loadImageResource(ClanTurfPanel.class, HELP_ICON_RESOURCE);
+			}
+			catch (RuntimeException ex)
+			{
+				raw = null;
+			}
+		}
+
+		if (raw == null)
+		{
+			JButton b = new JButton("?"); // text fallback if the icon is ever gone
+			b.setFont(FontManager.getRunescapeBoldFont());
+			b.setFocusable(false);
+			b.setMargin(new Insets(2, 6, 2, 6));
+			b.setToolTipText("Clan Turf changelog");
+			b.addActionListener(e -> showWhatsNew());
+			return b;
+		}
+
+		// The icon is drawn on a 30px canvas with the same ~2px padding as the Discord icon, so load it at native
+		// size (no scaling) exactly like the Discord button: dimmed at rest, full-bright on hover.
+		final ImageIcon restIcon = new ImageIcon(ImageUtil.luminanceOffset(raw, -60));
+		final ImageIcon hoverIcon = new ImageIcon(raw);
+		JLabel label = new JLabel(restIcon);
+		label.setToolTipText("Clan Turf changelog - every update note");
+		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		label.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				label.setIcon(hoverIcon);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				label.setIcon(restIcon);
+			}
+
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				showWhatsNew();
+			}
+		});
+		return label;
+	}
+
 	private static JComponent discordButton()
 	{
 		final boolean ready = !DISCORD_INVITE.contains("YOUR_INVITE");
@@ -1051,8 +1067,6 @@ class ClanTurfPanel extends PluginPanel
 		battlesBox.setVisible(in && !battlesCollapsed);
 		allianceHeader.setVisible(in);
 		allianceBody.setVisible(in && !allianceCollapsed);
-		helpHeader.setVisible(in);
-		helpBody.setVisible(in && !helpCollapsed);
 		renderLeaderboard(); // hide/show the leaderboard section with the rest on login/logout
 	}
 
@@ -1550,20 +1564,34 @@ class ClanTurfPanel extends PluginPanel
 	/** The clickable World / Owner / Tiles sort bar shown under the pinned current-world row. */
 	private JPanel battleSortHeader()
 	{
-		JPanel bar = new JPanel();
-		bar.setLayout(new BoxLayout(bar, BoxLayout.X_AXIS));
+		// Same three fixed columns as a battle row (matching insets and widths), so each sort label sits directly
+		// over its column and never drifts as clan names change. World left, Owner flexing, Tiles right-aligned.
+		JPanel bar = new JPanel(new BorderLayout(6, 0));
 		bar.setOpaque(false);
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
-		bar.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0)); // breathing room above and below
-		// Order the labels to match the columns below them (World, Owner on the left; Tiles right-aligned
-		// over its numbers), so they read correctly as column headers even though each one is a sort toggle.
-		bar.add(sortLabel("World", BattleSort.WORLD));
-		bar.add(Box.createHorizontalStrut(10));
-		bar.add(sortLabel("Owner", BattleSort.OWNER));
-		bar.add(Box.createHorizontalGlue());
-		bar.add(sortLabel("Tiles", BattleSort.TILES));
-		bar.add(Box.createHorizontalStrut(32)); // match the tiles column's right buffer so it sits over the counts
+		bar.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8)); // left/right insets match a row's (accent+inset)
+
+		JLabel world = sortLabel("World", BattleSort.WORLD);
+		fixWidth(world, BATTLE_WORLD_COL_W);
+		bar.add(world, BorderLayout.WEST);
+
+		bar.add(sortLabel("Owner", BattleSort.OWNER), BorderLayout.CENTER);
+
+		JLabel tiles = sortLabel("Tiles", BattleSort.TILES);
+		tiles.setHorizontalAlignment(JLabel.RIGHT);
+		fixWidth(tiles, BATTLE_TILES_COL_W);
+		bar.add(tiles, BorderLayout.EAST);
 		return bar;
+	}
+
+	/** Pins a component to a fixed width (used for the Active-battles world/tiles columns so header and rows
+	 *  line up regardless of content). Height stays flexible so BorderLayout can stretch the cell. */
+	private static void fixWidth(JComponent c, int w)
+	{
+		Dimension d = new Dimension(w, c.getPreferredSize().height);
+		c.setPreferredSize(d);
+		c.setMinimumSize(d);
+		c.setMaximumSize(new Dimension(w, Integer.MAX_VALUE));
 	}
 
 	/** One sort column label; shows an arrow when active, click to select it or flip its direction. */
@@ -1609,50 +1637,55 @@ class ClanTurfPanel extends PluginPanel
 				BorderFactory.createMatteBorder(0, 3, 0, 0, accentColor);
 		row.setBorder(BorderFactory.createCompoundBorder(divider,
 				BorderFactory.createCompoundBorder(accent,
-						BorderFactory.createEmptyBorder(5, 5, 5, 0))));
+						BorderFactory.createEmptyBorder(5, 5, 5, 8))));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE,
 				b.getRunnerUp() != null ? 46 : 30));
 
 		String ownerHex = hex(ClanTurfColors.forClan(b.getOwner()));
 
+		// Three fixed-position columns so the sort labels above always line up: world (+ [HW]) in a fixed-width
+		// WEST slot, the clan name(s) flexing in the CENTER (clipped, never shifting the columns), and the tile
+		// counts right-aligned in a fixed-width EAST slot. vs battles stack owner over runner-up in each column.
+		String hwWorld = isHomeBattle(b) ? "&nbsp;<span style='color:#ffd700'>[HW]</span>" : "";
+		// nobr so "W### [HW]" never wraps to a second line inside the fixed-width column (which would tear the row).
+		JLabel world = new JLabel("<html><nobr><b>W" + b.getWorld() + "</b>" + hwWorld + "</nobr></html>");
+		world.setFont(FontManager.getRunescapeSmallFont());
+		world.setForeground(Color.WHITE);
+		fixWidth(world, BATTLE_WORLD_COL_W);
+		row.add(world, BorderLayout.WEST);
 
-		// Other worlds: world (+ [HW]) and the clan name(s) on the left with the "vs" between the two names;
-		// the tile counts go in a separate right-aligned EAST label so they line up in a column down the list
-		// (BorderLayout pins EAST to the right edge, which a JLabel's own HTML width can't reliably do).
-		String hwWorld = isHomeBattle(b) ? "&nbsp;&nbsp;<span style='color:#ffd700'>[HW]</span>" : "";
-		String worldTag = "<b>W" + b.getWorld() + "</b>" + hwWorld;
 		String ownerName = "<span style='color:#" + ownerHex + "'>"
 				+ escape(clip(b.getOwner(), BATTLE_NAME_CLIP)) + "</span>";
-		String leftHtml;
-		String rightHtml;
+		String ownerHtml;
+		String tilesHtml;
 		if (b.getRunnerUp() != null)
 		{
 			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
 			String upName = "<span style='color:#" + upHex + "'>"
 					+ escape(clip(b.getRunnerUp(), BATTLE_NAME_CLIP)) + "</span>";
-			leftHtml = "<html><table cellpadding=0 cellspacing=0>"
-					+ "<tr><td valign='top'>" + worldTag + "&nbsp;&nbsp;</td>"
-					+ "<td>" + ownerName + "</td>"
+			ownerHtml = "<html><table cellpadding=0 cellspacing=0>"
+					+ "<tr><td>" + ownerName + "</td>"
 					+ "<td rowspan=2 valign='middle'>&nbsp;vs&nbsp;</td></tr>"
-					+ "<tr><td></td><td>" + upName + "</td></tr></table></html>";
-			rightHtml = "<html><div align='right'>" + b.getOwnerTiles() + "<br>"
+					+ "<tr><td>" + upName + "</td></tr></table></html>";
+			tilesHtml = "<html><div align='right'>" + b.getOwnerTiles() + "<br>"
 					+ b.getRunnerUpTiles() + "</div></html>";
 		}
 		else
 		{
-			leftHtml = "<html>" + worldTag + "&nbsp;&nbsp;" + ownerName + "</html>";
-			rightHtml = "<html>" + b.getOwnerTiles() + "</html>";
+			ownerHtml = "<html>" + ownerName + "</html>";
+			tilesHtml = "<html>" + b.getOwnerTiles() + "</html>";
 		}
-		JLabel info = new JLabel(leftHtml);
-		info.setFont(FontManager.getRunescapeSmallFont());
-		info.setForeground(Color.WHITE);
-		row.add(info, BorderLayout.CENTER);
-		JLabel tiles = new JLabel(rightHtml);
+		JLabel owner = new JLabel(ownerHtml);
+		owner.setFont(FontManager.getRunescapeSmallFont());
+		owner.setForeground(Color.WHITE);
+		row.add(owner, BorderLayout.CENTER);
+
+		JLabel tiles = new JLabel(tilesHtml);
 		tiles.setFont(FontManager.getRunescapeSmallFont());
 		tiles.setForeground(Color.WHITE);
 		tiles.setHorizontalAlignment(JLabel.RIGHT);
-		tiles.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 32)); // buffer so counts aren't flush right
+		fixWidth(tiles, BATTLE_TILES_COL_W);
 		row.add(tiles, BorderLayout.EAST);
 		return row;
 	}
