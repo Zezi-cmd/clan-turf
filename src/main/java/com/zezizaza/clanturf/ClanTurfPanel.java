@@ -229,7 +229,9 @@ class ClanTurfPanel extends PluginPanel
 	private final JPanel leaderboardBox = new JPanel();
 	private boolean leaderboardCollapsed = true; // starts collapsed; only "Your tiles" shows until expanded
 	private boolean leaderboardOnline = false;
-	private boolean helpCollapsed = true; // Help section (report / changelog / discord) starts collapsed
+	private boolean helpCollapsed = true; // Help section (changelog / discord) starts collapsed
+	private final JLabel helpHeader = new JLabel("Help  ▸");
+	private final JPanel helpBody = new JPanel();
 
 	private enum LbSort { DAILY, WEEKLY }
 
@@ -528,7 +530,6 @@ class ClanTurfPanel extends PluginPanel
 		whatsNewBtn.setToolTipText("See every Clan Turf update note, in case you missed one in chat.");
 		whatsNewBtn.addActionListener(e -> showWhatsNew());
 
-		JPanel helpBody = new JPanel();
 		helpBody.setLayout(new BoxLayout(helpBody, BoxLayout.Y_AXIS));
 		helpBody.setOpaque(false);
 		helpBody.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -538,12 +539,12 @@ class ClanTurfPanel extends PluginPanel
 		helpBody.add(whatsNewBtn);
 		helpBody.setVisible(false); // collapsed by default
 
-		JLabel helpHeader = new JLabel("Help  ▸");
 		helpHeader.setFont(HEADER_FONT);
 		helpHeader.setForeground(ColorScheme.BRAND_ORANGE);
 		helpHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
 		helpHeader.setBorder(BorderFactory.createEmptyBorder(14, 0, 4, 0));
 		helpHeader.setToolTipText("Get help on the Discord, or view the changelog.");
+		helpHeader.setVisible(false); // hidden until signed in (revealed by setSignedIn, like the other sections)
 		helpHeader.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		helpHeader.addMouseListener(new MouseAdapter()
 		{
@@ -1050,6 +1051,8 @@ class ClanTurfPanel extends PluginPanel
 		battlesBox.setVisible(in && !battlesCollapsed);
 		allianceHeader.setVisible(in);
 		allianceBody.setVisible(in && !allianceCollapsed);
+		helpHeader.setVisible(in);
+		helpBody.setVisible(in && !helpCollapsed);
 		renderLeaderboard(); // hide/show the leaderboard section with the rest on login/logout
 	}
 
@@ -1552,12 +1555,14 @@ class ClanTurfPanel extends PluginPanel
 		bar.setOpaque(false);
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
 		bar.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0)); // breathing room above and below
-		bar.add(sortLabel("Tiles", BattleSort.TILES)); // default sort, so it leads
-		bar.add(Box.createHorizontalStrut(10));
+		// Order the labels to match the columns below them (World, Owner on the left; Tiles right-aligned
+		// over its numbers), so they read correctly as column headers even though each one is a sort toggle.
 		bar.add(sortLabel("World", BattleSort.WORLD));
 		bar.add(Box.createHorizontalStrut(10));
 		bar.add(sortLabel("Owner", BattleSort.OWNER));
 		bar.add(Box.createHorizontalGlue());
+		bar.add(sortLabel("Tiles", BattleSort.TILES));
+		bar.add(Box.createHorizontalStrut(32)); // match the tiles column's right buffer so it sits over the counts
 		return bar;
 	}
 
