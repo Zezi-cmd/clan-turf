@@ -858,6 +858,74 @@ class ClanTurfPanel extends PluginPanel
 	 *  Reuses RuneLite's own bundled Discord icon and renders it the way RuneLite does - a bare icon label,
 	 *  no button chrome or border - that brightens on hover. Falls back to a text label if the icon is gone,
 	 *  and stays a dimmed no-op until DISCORD_INVITE is a real invite URL. */
+	/** Put a small filled triangle after a section header's text: pointing right when collapsed, down when
+	 *  expanded. Drawn as an icon rather than a Unicode glyph so it renders on every OS - the triangle glyphs
+	 *  were missing from the RuneScape font on macOS and showed as an empty box. */
+	private static void setCollapseArrow(JLabel header, boolean collapsed)
+	{
+		header.setIcon(new TriangleIcon(collapsed ? TriangleIcon.RIGHT : TriangleIcon.DOWN, 8));
+		header.setHorizontalTextPosition(javax.swing.SwingConstants.LEFT); // triangle sits to the right of the text
+		header.setIconTextGap(6);
+	}
+
+	/** A small filled triangle painted in the owning label's foreground so it matches the text color. Drawn
+	 *  instead of using a Unicode triangle, which the RuneScape font lacks on macOS (rendered as a box). */
+	private static final class TriangleIcon implements Icon
+	{
+		static final int RIGHT = 0;
+		static final int DOWN = 1;
+		static final int UP = 2;
+		private final int dir;
+		private final int size;
+
+		TriangleIcon(int dir, int size)
+		{
+			this.dir = dir;
+			this.size = size;
+		}
+
+		@Override
+		public int getIconWidth()
+		{
+			return size;
+		}
+
+		@Override
+		public int getIconHeight()
+		{
+			return size;
+		}
+
+		@Override
+		public void paintIcon(Component c, Graphics g, int x, int y)
+		{
+			Graphics2D g2 = (Graphics2D) g.create();
+			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			g2.setColor(c.getForeground());
+			int s = size;
+			int[] xs;
+			int[] ys;
+			switch (dir)
+			{
+				case DOWN:
+					xs = new int[]{x, x + s, x + s / 2};
+					ys = new int[]{y, y, y + s};
+					break;
+				case UP:
+					xs = new int[]{x, x + s, x + s / 2};
+					ys = new int[]{y + s, y + s, y};
+					break;
+				case RIGHT:
+				default:
+					xs = new int[]{x, x + s, x};
+					ys = new int[]{y, y + s / 2, y + s};
+					break;
+			}
+			g2.fillPolygon(xs, ys, 3);
+			g2.dispose();
+		}
+	}
+
 	/** The "?" button next to the Discord icon; opens the changelog. Reuses RuneLite's own plugin-hub help icon
 	 *  and renders it exactly like the Discord button (same 30px size, dimmed at rest, full-bright on hover) so
 	 *  the two read as a matching pair. Loaded defensively so a missing/renamed resource can't crash startUp. */
@@ -1601,7 +1669,13 @@ class ClanTurfPanel extends PluginPanel
 	private JLabel sortLabel(String text, BattleSort key)
 	{
 		boolean active = battleSort == key;
-		JLabel l = new JLabel(text + (active ? (battleSortDesc ? " ▾" : " ▴") : ""));
+		JLabel l = new JLabel(text);
+		if (active)
+		{
+			l.setIcon(new TriangleIcon(battleSortDesc ? TriangleIcon.DOWN : TriangleIcon.UP, 7));
+			l.setHorizontalTextPosition(javax.swing.SwingConstants.LEFT);
+			l.setIconTextGap(3);
+		}
 		l.setFont(FontManager.getRunescapeSmallFont());
 		l.setForeground(active ? ColorScheme.BRAND_ORANGE : ColorScheme.LIGHT_GRAY_COLOR);
 		l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -1790,7 +1864,8 @@ class ClanTurfPanel extends PluginPanel
 
 	private void renderBattlesHeader()
 	{
-		battlesHeader.setText(battlesBase + (battlesCollapsed ? "  ▸" : "  ▾"));
+		battlesHeader.setText(battlesBase);
+		setCollapseArrow(battlesHeader, battlesCollapsed);
 	}
 
 	private void toggleGlobal()
@@ -1810,7 +1885,8 @@ class ClanTurfPanel extends PluginPanel
 		globalBox.setVisible(globalHasData);
 		globalIntro.setVisible(globalHasData && !globalCollapsed);
 		globalSub.setVisible(globalHasData && !globalCollapsed);
-		globalHeader.setText("Community Claims" + (globalCollapsed ? "  ▸" : "  ▾"));
+		globalHeader.setText("Community Claims");
+		setCollapseArrow(globalHeader, globalCollapsed);
 	}
 
 	/** Builds the collapsible Leaderboards section (personal counter + opted-in clan board). Server-only;
@@ -1898,7 +1974,8 @@ class ClanTurfPanel extends PluginPanel
 
 		leaderboardHeader.setVisible(lbShow);
 		leaderboardBox.setVisible(lbShow); // box stays visible online; collapse hides only the board part
-		leaderboardHeader.setText("Leaderboards" + (leaderboardCollapsed ? "  ▸" : "  ▾"));
+		leaderboardHeader.setText("Leaderboards");
+		setCollapseArrow(leaderboardHeader, leaderboardCollapsed);
 		leaderboardBox.removeAll();
 		if (!lbShow)
 		{
@@ -2076,7 +2153,13 @@ class ClanTurfPanel extends PluginPanel
 	private JLabel lbSortLabel(String text, LbSort key)
 	{
 		boolean active = lbSort == key;
-		JLabel l = new JLabel(active ? text + " ▾" : text);
+		JLabel l = new JLabel(text);
+		if (active)
+		{
+			l.setIcon(new TriangleIcon(TriangleIcon.DOWN, 7));
+			l.setHorizontalTextPosition(javax.swing.SwingConstants.LEFT);
+			l.setIconTextGap(3);
+		}
 		l.setFont(FontManager.getRunescapeSmallFont());
 		l.setForeground(active ? ColorScheme.BRAND_ORANGE : ColorScheme.LIGHT_GRAY_COLOR);
 		l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -2933,7 +3016,8 @@ class ClanTurfPanel extends PluginPanel
 	private void updateAllianceHeaderText()
 	{
 		String base = allianceCanManage ? "Alliance Tools" : "Alliance";
-		allianceHeader.setText(base + (allianceCollapsed ? "  ▸" : "  ▾"));
+		allianceHeader.setText(base);
+		setCollapseArrow(allianceHeader, allianceCollapsed);
 		allianceHeader.setToolTipText(allianceCanManage ? "Admin only options." : null);
 	}
 
