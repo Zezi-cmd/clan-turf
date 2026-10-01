@@ -639,6 +639,24 @@ class HttpClanTurfStore implements ClanTurfStore
 	}
 
 	@Override
+	public void leaderboardAdd(String name, String clan, long dailyDelta, long weeklyDelta)
+	{
+		ScheduledExecutorService e = exec;
+		if (e == null || name == null || clan == null)
+		{
+			return;
+		}
+		if (dailyDelta <= 0 && weeklyDelta <= 0)
+		{
+			return; // nothing to add (e.g. a seed from a fresh install with zero local totals)
+		}
+		e.execute(() -> sendResult("POST", "/leaderboard/add",
+				form("name", name, "clan", clan,
+						"daily", Long.toString(Math.max(0, dailyDelta)),
+						"weekly", Long.toString(Math.max(0, weeklyDelta)))));
+	}
+
+	@Override
 	public void leaderboardOptOut(String name)
 	{
 		ScheduledExecutorService e = exec;

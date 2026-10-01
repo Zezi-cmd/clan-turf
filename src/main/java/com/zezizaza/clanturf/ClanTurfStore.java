@@ -231,6 +231,16 @@ interface ClanTurfStore
 	{
 	}
 
+	/**
+	 * Add to this player's authoritative daily/weekly tile totals on the server (opt-in, networked only).
+	 * Sends a delta (normally 1 per claim), never a total, so the same account played on two devices adds up
+	 * instead of one machine overwriting the other. Used with a one-time seed of the existing local totals at
+	 * opt-in. The server holds the result so it follows the account across devices.
+	 */
+	default void leaderboardAdd(String name, String clan, long dailyDelta, long weeklyDelta)
+	{
+	}
+
 	/** Remove this player from the leaderboard (opt-out or clan change). Networked only. */
 	default void leaderboardOptOut(String name)
 	{

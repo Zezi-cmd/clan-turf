@@ -356,9 +356,8 @@ public class ClanTurfPlugin extends Plugin
 	private int lbDay;
 	private int lbWeek;
 	private boolean lbLoaded;
-	private long lastLbPushMs;
 	private String lbOptedInName; // display name currently published to the leaderboard, else null
-	private static final long LB_PUSH_THROTTLE_MS = 15000; // at most one leaderboard submit per 15s
+	private boolean lbSeeded;     // true once this session has seeded existing local totals to the server on opt-in
 
 	/** Daily turf reset (matches the server's default CLANTURF_RESET_HOUR). */
 	private static final int RESET_HOUR_UTC = 0;
@@ -1278,7 +1277,7 @@ public class ClanTurfPlugin extends Plugin
 		lbDaily++;
 		lbWeekly++;
 		persistLeaderboardCounters();
-		pushLeaderboardIfOptedIn();
+		sendClaimIncrementIfOptedIn();
 	}
 
 	private void persistLeaderboardCounters()
@@ -1305,15 +1304,11 @@ public class ClanTurfPlugin extends Plugin
 		return lbWeekly;
 	}
 
-	/** Publish the current totals to the leaderboard, throttled, but only while opted in and online. */
-	private void pushLeaderboardIfOptedIn()
+	/** Report the single tile just claimed to the server as a +1 delta (opt-in, online). The server adds it to
+	 *  the account's authoritative total, so claims made on a second device add up instead of overwriting. */
+	private void sendClaimIncrementIfOptedIn()
 	{
 		if (!config.leaderboardOptIn() || !config.useServer())
-		{
-			return;
-		}
-		long now = System.currentTimeMillis();
-		if (now - lastLbPushMs < LB_PUSH_THROTTLE_MS)
 		{
 			return;
 		}
@@ -1323,8 +1318,49 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
-		lastLbPushMs = now;
-		store.leaderboardSubmit(me.getName(), clan, lbDaily, lbWeekly);
+		store.leaderboardAdd(me.getName(), clan, 1, 1);
+	}
+
+	/** Pull the server's authoritative totals up into the local display when this device is behind - a fresh
+	 *  install or a second machine on the same account. Never lowers the local count: per-claim increments and
+	 *  the shared UTC rollover (the server serves a stale day/week as 0) keep the two in step on the way down. */
+	private void reconcileLeaderboardFromServer()
+	{
+		if (store != serverStore || !config.leaderboardOptIn() || !config.useServer())
+		{
+			return;
+		}
+		ensureLeaderboardLoaded();
+		rollLeaderboardPeriods();
+		String clan = effectiveClanName();
+		Player me = client.getLocalPlayer();
+		if (clan == null || me == null || me.getName() == null)
+		{
+			return;
+		}
+		String myName = me.getName();
+		boolean changed = false;
+		for (ClanTurfStore.LeaderboardEntry e : store.getLeaderboard(clan))
+		{
+			if (myName.equalsIgnoreCase(e.name))
+			{
+				if (e.daily > lbDaily)
+				{
+					lbDaily = (int) e.daily;
+					changed = true;
+				}
+				if (e.weekly > lbWeekly)
+				{
+					lbWeekly = (int) e.weekly;
+					changed = true;
+				}
+				break;
+			}
+		}
+		if (changed)
+		{
+			persistLeaderboardCounters();
+		}
 	}
 
 	/** Opt in/out of the leaderboard when the toggle (or online state) changes: a forced push + refresh on
@@ -1347,22 +1383,31 @@ public class ClanTurfPlugin extends Plugin
 		{
 			ensureLeaderboardLoaded();
 			rollLeaderboardPeriods();
-			lastLbPushMs = 0L; // let this push through the throttle
-			pushLeaderboardIfOptedIn();
+			if (!lbSeeded)
+			{
+				// One-time seed: add the totals already counted locally before opt-in so existing progress
+				// shows on the shared board. Additive (never an absolute set), so it can't overwrite the
+				// total another device already built. A fresh install seeds 0/0, a no-op.
+				serverStore.leaderboardAdd(name, clan, lbDaily, lbWeekly);
+				lbSeeded = true;
+			}
 			serverStore.refreshLeaderboard();
 			lbOptedInName = name;
 		}
 		else
 		{
 			// Not opting in (or no clan): remove our row. Sent even if we opted in a previous session
-			// (lbOptedInName isn't persisted), so unchecking the box always removes us server-side.
+			// (lbOptedInName isn't persisted), so unchecking the box always removes us server-side. Clearing
+			// lbSeeded lets a later opt-in re-seed, since opt-out deletes our server row.
 			lbOptedInName = null;
+			lbSeeded = false;
 			serverStore.leaderboardOptOut(name);
 			serverStore.refreshLeaderboard();
 		}
 	}
 
-	/** Per-tick: keep the leaderboard fresh while opted in (self-throttled push, midnight rollover). */
+	/** Per-tick while opted in: roll the local period at midnight and pull up the server's authoritative total
+	 *  so a second device on the same account catches up to the shared count without needing a claim first. */
 	private void tickLeaderboard()
 	{
 		if (store != serverStore || !config.leaderboardOptIn())
@@ -1371,7 +1416,7 @@ public class ClanTurfPlugin extends Plugin
 		}
 		ensureLeaderboardLoaded();
 		rollLeaderboardPeriods();
-		pushLeaderboardIfOptedIn();
+		reconcileLeaderboardFromServer();
 	}
 
 	/** The opted-in members of your clan on the leaderboard (empty if you have no clan or aren't networked). */

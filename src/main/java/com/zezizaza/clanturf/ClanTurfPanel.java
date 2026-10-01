@@ -1013,7 +1013,10 @@ class ClanTurfPanel extends PluginPanel
 		String stake = stakeAsFraction
 				? stakeClaimed + " / " + stakeTotal
 				: String.format("%.1f", stakeTotal > 0 ? stakeClaimed * 100.0 / stakeTotal : 0.0) + "% Stake";
-		headline.setText("<html>" + headlineOwner + " &nbsp;·&nbsp; " + stake + "</html>");
+		// <nobr> keeps the whole "GE owners: X · NN% Stake" line on one row. Without it, a wider percent can
+		// wrap "Stake" to a second line, which changes the label's height and shoves the whole panel down until
+		// the percent narrows again - the random sidebar jump. One line always, even if a long name has to clip.
+		headline.setText("<html><nobr>" + headlineOwner + " &nbsp;·&nbsp; " + stake + "</nobr></html>");
 	}
 
 	/** Sets a paint-as row's left bar to the given color (solid orange selected, faint gold on hover). */
