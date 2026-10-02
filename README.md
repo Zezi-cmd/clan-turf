@@ -30,7 +30,7 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 ## The crowd reacts
 
-Take the GE while you're standing in it and the whole cast of Grand Exchange NPCs calls it out overhead, each with lines that fit their character. The chatter appears in the game's overhead yellow with your clan's name picked out in its color, announced in a stagger rather than all at once. It only fires on an ownership flip, and nothing is ever posted to the chat box. The crowd also hails the winner at the daily reset. Toggle it with **NPC takeover text**.
+Take the GE while you're standing in it and the whole cast of Grand Exchange NPCs calls it out overhead, each with lines that fit their character. The chatter appears in the game's overhead yellow with your clan's name picked out in its color, announced in a stagger rather than all at once. It only fires on an ownership flip, and nothing is ever posted to the chat box. The crowd also hails the winner at the daily reset. Toggle it with **NPC crowd text**.
 
 ![NPC takeover text](images/npcbark.png)
 

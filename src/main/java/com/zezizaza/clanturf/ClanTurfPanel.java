@@ -233,7 +233,7 @@ class ClanTurfPanel extends PluginPanel
 	// clan board sortable by daily or weekly total. Server-mode only.
 	private final JLabel leaderboardHeader = new JLabel("Leaderboards");
 	private final JPanel leaderboardBox = new JPanel();
-	private boolean leaderboardCollapsed = true; // starts collapsed; only "Your tiles" shows until expanded
+	private boolean leaderboardCollapsed = false; // starts expanded (like Active battles); the board shows right away
 	private boolean leaderboardOnline = false;
 
 	private enum LbSort { DAILY, WEEKLY }
@@ -245,8 +245,9 @@ class ClanTurfPanel extends PluginPanel
 	private String lbMyName;
 	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoard = java.util.Collections.emptyList();
 	private String lastLbSig = ""; // skip the rebuild (and its flicker) when nothing displayed has changed
-	private String changelogHtml = ""; // full version history HTML for the "What's New" dialog
-	private String changelogTitle = "Clan Turf - Changelog"; // dialog title; gains "- Current version: VN" via setChangelog
+	// {versionTitle, bodyHtml} per version, newest first, for the collapsible "What's New" dialog.
+	private java.util.List<String[]> changelogSections = java.util.Collections.emptyList();
+	private String changelogTitle = "Clan Turf"; // dialog title bar; set to "Clan Turf <version>" via setChangelog
 	private boolean lbReady; // true once the first board poll has completed (else show "Loading")
 	private java.util.Map<String, javax.swing.Icon> lbRankIcons = java.util.Collections.emptyMap(); // name -> rank icon
 	private String lbClanName = ""; // your clan, shown above the board
@@ -2752,42 +2753,155 @@ class ClanTurfPanel extends PluginPanel
 		this.homeWorldLookup = f;
 	}
 
-	/** The plugin hands us the full version-history HTML for the "What's New" dialog, plus the current version
-	 *  label (e.g. "V6") for the dialog title. */
-	void setChangelog(String html, String versionLabel)
+	/** The plugin hands us the version history as {versionTitle, bodyHtml} per version for the dialog, plus the
+	 *  current version label (e.g. "V6 - Cross-Device Sync") for the title bar. */
+	void setChangelog(java.util.List<String[]> sections, String versionLabel)
 	{
-		this.changelogHtml = html == null ? "" : html;
+		this.changelogSections = sections == null ? java.util.Collections.emptyList() : sections;
 		this.changelogTitle = versionLabel == null || versionLabel.isEmpty()
-				? "Clan Turf - Changelog"
-				: "Clan Turf - Changelog - Current version: " + versionLabel;
+				? "Clan Turf"
+				: "Clan Turf " + versionLabel;
 	}
 
-	/** Popup with every update note, newest first, for anyone who missed a login changelog. */
+	/** Popup with every update note, newest first. Each version is its own collapsible section, with only the
+	 *  current one open; click a version header to expand or collapse it. The dialog sizes to its content. */
 	private void showWhatsNew()
 	{
-		// A JEditorPane (unlike a JLabel) tracks the viewport width and re-wraps HTML text to fit it, so the
-		// text never renders wider than the pane and gets clipped. Non-editable, themed to the dark dialog.
-		javax.swing.JEditorPane content = new javax.swing.JEditorPane("text/html", changelogHtml.isEmpty()
-				? "<html><body style='color:#c8c8c8'>No update notes yet.</body></html>" : changelogHtml);
-		content.setEditable(false);
+		JPanel content = new JPanel();
+		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
 		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		content.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-		content.setCaretPosition(0);
+
+		// Pin the content to a fixed column width so the centered titles don't re-center (shift) when a body opens.
+		// The spacer must be LEFT-aligned like the sections: a mix of alignments in a BoxLayout balloons the width
+		// and shoves everything to the right.
+		final int colW = 415;
+		javax.swing.Box.Filler widthPin = new javax.swing.Box.Filler(
+				new Dimension(colW, 0), new Dimension(colW, 0), new Dimension(colW, 0));
+		widthPin.setAlignmentX(Component.LEFT_ALIGNMENT);
+		content.add(widthPin);
+
+		java.util.List<FadePanel> sections = new java.util.ArrayList<>();
+		final java.util.List<JComponent> bodies = new java.util.ArrayList<>();
+		final java.util.List<JLabel> headers = new java.util.ArrayList<>();
+		final Color titleNormal = ColorScheme.BRAND_ORANGE;   // collapsed section title
+		final Color titleOpen = new Color(0xFFBE6E);          // lighter orange marks the open section
+		final Color titleHover = new Color(0xFFD9A8);         // lightest on mouse-over
+		final javax.swing.JDialog[] dialogRef = {null};       // set once the dialog exists, so headers can retitle it
+		JComponent currentBody = null;
+		JLabel currentHeader = null;
+		for (int i = 0; i < changelogSections.size(); i++)
+		{
+			String[] sec = changelogSections.get(i);
+
+			// A JEditorPane (not a JLabel) reliably wraps HTML to a set width - the same reason the old single-pane
+			// dialog never clipped. Size it to the column, then lock its height to the wrapped result.
+			javax.swing.JEditorPane body = new javax.swing.JEditorPane("text/html", sec[1]);
+			body.setEditable(false);
+			body.setOpaque(false);
+			body.setBorder(null);
+			body.setMargin(new Insets(0, 0, 0, 0));
+			body.setAlignmentX(Component.LEFT_ALIGNMENT);
+			body.setSize(new Dimension(colW, Short.MAX_VALUE)); // lay out at colW so the wrapped height is correct
+			int bh = body.getPreferredSize().height;
+			body.setPreferredSize(new Dimension(colW, bh));
+			body.setMaximumSize(new Dimension(colW, bh));
+			body.setVisible(false); // every version starts collapsed; the current one opens after the cascade
+
+			JLabel header = new JLabel(sec[0]);
+			header.setFont(HEADER_FONT.deriveFont(HEADER_FONT.getSize2D() + 3f)); // a bit larger than panel headers
+			header.setForeground(titleNormal);
+			header.setHorizontalAlignment(javax.swing.SwingConstants.CENTER); // title text centered...
+			header.setAlignmentX(Component.LEFT_ALIGNMENT);                   // ...but anchored left like the body
+			header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			header.setBorder(BorderFactory.createEmptyBorder(8, 0, 2, 0));
+			setCollapseArrow(header, true);
+			// Measure the height AFTER the font, border and arrow are applied, or the title gets vertically clipped.
+			header.setMaximumSize(new Dimension(Integer.MAX_VALUE, header.getPreferredSize().height));
+			final int idx = i;
+			header.addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					// Accordion: open the clicked version and collapse all the others; clicking the open one closes it.
+					boolean wasOpen = bodies.get(idx).isVisible();
+					for (int j = 0; j < bodies.size(); j++)
+					{
+						boolean open = j == idx && !wasOpen;
+						bodies.get(j).setVisible(open);
+						setCollapseArrow(headers.get(j), !open);
+						headers.get(j).setForeground(open ? titleOpen : titleNormal);
+					}
+					header.setForeground(titleHover); // still hovered after the click
+					if (dialogRef[0] != null) // title bar names the open version, or just "Clan Turf" when all closed
+					{
+						dialogRef[0].setTitle(!wasOpen ? "Clan Turf " + headers.get(idx).getText() : "Clan Turf - Changelog");
+					}
+					content.revalidate();
+					content.repaint();
+				}
+
+				@Override
+				public void mouseEntered(MouseEvent e)
+				{
+					header.setForeground(titleHover);
+				}
+
+				@Override
+				public void mouseExited(MouseEvent e)
+				{
+					header.setForeground(bodies.get(idx).isVisible() ? titleOpen : titleNormal);
+				}
+			});
+
+			FadePanel section = new FadePanel();
+			section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+			section.setAlignmentX(Component.LEFT_ALIGNMENT);
+			section.add(header);
+			section.add(body);
+			content.add(section);
+			sections.add(section);
+			bodies.add(body);
+			headers.add(header);
+			if (i == 0)
+			{
+				currentBody = body;
+				currentHeader = header;
+			}
+		}
+		if (changelogSections.isEmpty())
+		{
+			JLabel empty = new JLabel("No update notes yet.");
+			empty.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			content.add(empty);
+		}
+
+		// Size the dialog to fit the current version EXPANDED plus the rest collapsed, so opening it at the end
+		// of the cascade doesn't resize the window. Measure with it open, then recollapse for the cascade.
+		if (currentBody != null)
+		{
+			currentBody.setVisible(true);
+		}
+		int wanted = content.getPreferredSize().height + 16;
+		if (currentBody != null)
+		{
+			currentBody.setVisible(false);
+		}
+
 		javax.swing.JScrollPane scroll = new javax.swing.JScrollPane(content);
-		scroll.setPreferredSize(new Dimension(470, 600));
+		scroll.setPreferredSize(new Dimension(colW + 50, Math.min(wanted, 600))); // snug to the column, not oversized
 		scroll.setHorizontalScrollBarPolicy(javax.swing.JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		scroll.setVerticalScrollBarPolicy(javax.swing.JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 		scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
 
-		// Build the dialog by hand instead of showMessageDialog so we can move it off the side panel -
-		// centered on this panel it lands on top of the sidebar. Nudge it left of the panel's left edge.
+		// Build the dialog by hand so we can move it off the side panel (centered, it lands on top of the sidebar).
 		JOptionPane pane = new JOptionPane(scroll, JOptionPane.PLAIN_MESSAGE);
 		javax.swing.JDialog dialog = pane.createDialog(this, changelogTitle);
-		// Non-modal so it floats over the game without blocking clicks/camera behind it. Dispose when the user
-		// clicks OK (pane value changes) or closes the window; don't dispose right after showing, or a non-modal
-		// dialog would vanish instantly.
-		dialog.setModal(false);
-		dialog.setAlwaysOnTop(true); // floats above the game window so it doesn't get buried while you play
+		dialogRef[0] = dialog; // let the section headers retitle the bar as they open/close
+		dialog.setModal(false); // floats over the game without blocking clicks/camera behind it
+		dialog.setAlwaysOnTop(true);
 		dialog.setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
 		pane.addPropertyChangeListener(ev ->
 		{
@@ -2805,6 +2919,43 @@ class ClanTurfPanel extends PluginPanel
 		int y = panelOnScreen.y + 24;
 		dialog.setLocation(x, y);
 		dialog.setVisible(true);
+
+		// Cascade every version in collapsed, top-to-bottom (reuses the shared reveal timer + FadePanel alpha
+		// fade), then open the current version once they've all landed.
+		long startMs = System.currentTimeMillis() + 40;
+		for (int i = 0; i < sections.size(); i++)
+		{
+			scheduleReveal(sections.get(i), startMs + i * 150L);
+		}
+		final JComponent openBody = currentBody;
+		final JLabel openHeader = currentHeader;
+		if (openBody != null)
+		{
+			int openDelay = (int) (sections.size() * 150L + 260); // after the last section has faded in
+			javax.swing.Timer expand = new javax.swing.Timer(openDelay, ev ->
+			{
+				// Edge case: if the user already opened a section during the cascade, respect their choice and
+				// don't force the current one open too (which would put two open at once).
+				for (JComponent b : bodies)
+				{
+					if (b.isVisible())
+					{
+						return;
+					}
+				}
+				openBody.setVisible(true);
+				setCollapseArrow(openHeader, false);
+				openHeader.setForeground(titleOpen); // lighter title to mark it open
+				if (dialogRef[0] != null)
+				{
+					dialogRef[0].setTitle("Clan Turf " + openHeader.getText());
+				}
+				content.revalidate();
+				content.repaint();
+			});
+			expand.setRepeats(false);
+			expand.start();
+		}
 	}
 
 	/** Owner staff: popup to change the passcode. Enter the current code plus a new one. */

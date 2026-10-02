@@ -311,11 +311,11 @@ public class ClanTurfPlugin extends Plugin
 			"Fixed: the GE owners line at the top no longer bounces to a second line as the stake percent changes.",
 			"Fixed: the side-panel section arrows now render correctly on macOS."},
 		{"V5 - PvP Indicators",
-			"Heads up: alliance overhead indicators are now hidden in the Wilderness and on PVP worlds (added in the last update), to follow Jagex's rules against scouting. We are exploring a limited opt-in way to show just the icon there, but it may stay off for good."},
+			"Hot Fix: alliance overhead indicators are now hidden in the Wilderness and on PVP worlds, to follow Jagex's rules against scouting. We are exploring a limited opt-in way to show just the icon there, but it may stay off for good."},
 		{"V4 - Home Worlds",
 			"New: Alliance home worlds. Every alliance can now claim a home world. Set one when you create an alliance, or change it any time in Alliance Tools, Change home world.",
 			"Your alliance's home world shows under its name in the side panel and in the scoreboard drop-down.",
-			"A gold [HW] tag appears next to an alliance in Active Battles when the fight is on its own home world.",
+			"New: Home-world tag. A gold [HW] tag appears next to an alliance in Active Battles when the fight is on its own home world.",
 			"Alliances made before this update start with no home world. An owner just needs to set it once in Alliance Tools.",
 			"If they're opted in you can now see other players' alliance symbols and your clan's leaderboard without opting in yourself. The opt-in toggles only control whether your own symbol and tiles are shared.",
 			"New: Join the Clan Turf community server! Click the Discord icon next to the Online button to join."},
@@ -462,7 +462,7 @@ public class ClanTurfPlugin extends Plugin
 		panel.setAllianceIconLookup(serverStore::allianceIconByDisplay);
 		panel.setAllianceRosterLookup(serverStore::allianceMembersByDisplay);
 		panel.setAllianceHomeWorldLookup(serverStore::allianceHomeWorldByDisplay);
-		panel.setChangelog(changelogHtml(), CHANGELOG[0][0]); // e.g. "V6 - Cross-Device Sync" for the dialog title
+		panel.setChangelog(changelogSections(), CHANGELOG[0][0]); // CHANGELOG[0][0] e.g. "V6 - Cross-Device Sync"
 		panel.setAllianceOwnerHandlers(this::kickAllianceClan, this::changeAllianceName,
 				this::changeAlliancePasscode, this::changeAllianceIcon, this::changeAllianceHomeWorld);
 		panel.setSlug(config.fullSlug());
@@ -1862,21 +1862,23 @@ public class ClanTurfPlugin extends Plugin
 		return sb.toString();
 	}
 
-	/** The whole version history as HTML for the side panel's "What's New" dialog (newest version first),
-	 *  so anyone who missed a login changelog can read every past update. */
-	private static String changelogHtml()
+	/** The version history as a list of {versionTitle, bodyHtml} pairs, newest first, for the collapsible
+	 *  "What's New" dialog. Each body is self-contained HTML (width-constrained so it wraps in the dialog). */
+	private static java.util.List<String[]> changelogSections()
 	{
-		StringBuilder sb = new StringBuilder("<html><body style='color:#c8c8c8; font-family:sans-serif'>");
+		java.util.List<String[]> out = new java.util.ArrayList<>();
 		for (String[] ver : CHANGELOG)
 		{
-			sb.append("<div style='color:#ff981f'><b>").append(ver[0]).append("</b></div>");
+			StringBuilder body = new StringBuilder(
+					"<html><body style='color:#c8c8c8; font-family:sans-serif'>"); // width set by the JEditorPane
 			for (int i = 1; i < ver.length; i++)
 			{
-				sb.append("&nbsp;&nbsp;&#8226; ").append(styleChangelogLine(ver[i])).append("<br>");
+				body.append("&nbsp;&nbsp;&#8226; ").append(styleChangelogLine(ver[i])).append("<br>");
 			}
-			sb.append("<br>");
+			body.append("</body></html>");
+			out.add(new String[]{ver[0], body.toString()});
 		}
-		return sb.append("</body></html>").toString();
+		return out;
 	}
 
 	private static String htmlEscape(String s)
@@ -1884,8 +1886,8 @@ public class ClanTurfPlugin extends Plugin
 		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 
-	/** Escapes a changelog line, then adds accents: bold the "New: <feature>." lead-in, and paint the
-	 *  [HW] tag the same gold it wears in the side panel, so the notes pop the way the sidebar does. */
+	/** Escapes a changelog line, then adds accents: bold the "New: <feature>." lead-in (and the "Fixed:" /
+	 *  "Heads up:" labels), and paint the [HW] tag the same gold it wears in the side panel. */
 	private static String styleChangelogLine(String s)
 	{
 		String line = htmlEscape(s);
@@ -1900,6 +1902,11 @@ public class ClanTurfPlugin extends Plugin
 			{
 				line = "<b>" + line + "</b>";
 			}
+		}
+		else if (line.startsWith("Fixed:") || line.startsWith("Hot Fix:"))
+		{
+			int colon = line.indexOf(':'); // bold just the label up to and including the colon
+			line = "<b>" + line.substring(0, colon + 1) + "</b>" + line.substring(colon + 1);
 		}
 		return line.replace("[HW]", "<span style='color:#ffd700'><b>[HW]</b></span>");
 	}
@@ -2865,14 +2872,23 @@ public class ClanTurfPlugin extends Plugin
 		prevResetMs = ms;
 	}
 
-	/** After the daily reset, post "[CT] X won the turf war on World N!" once, naming the clan/alliance the
-	 *  server recorded as owning the most tiles at the wipe. Gated to near the GE and the reset-countdown
-	 *  toggle, like the warning pings. Waits (up to 5 minutes) for the winner to arrive on the next battles
-	 *  poll, so it fires with the server's authoritative result rather than this client's last-seen owner. */
+	/** After the daily reset, announce the turf-war winner for your world once, naming the clan/alliance the
+	 *  server recorded as owning the most tiles at the wipe. Two independent outputs, each on its own toggle:
+	 *  the clan-tab line follows the reset-countdown toggle (the reset messaging feature), and the NPC victory
+	 *  chorus follows the NPC bark toggle (the single switch for all barking). Gated to near the GE, and waits
+	 *  up to 5 minutes for the winner to arrive on the next battles poll so it uses the server's authoritative
+	 *  result rather than this client's last-seen owner. */
 	private void maybeAnnounceWinner(boolean nearGe)
 	{
-		if (!pendingWinnerAnnounce || store != serverStore || !config.resetCountdown())
+		if (!pendingWinnerAnnounce || store != serverStore)
 		{
+			return;
+		}
+		boolean wantChat = config.resetCountdown(); // reset messaging owns the clan-tab line
+		boolean wantBark = config.npcBarks();       // the one NPC bark toggle owns the victory chorus
+		if (!wantChat && !wantBark)
+		{
+			pendingWinnerAnnounce = false; // neither output enabled, nothing to announce
 			return;
 		}
 		if (System.currentTimeMillis() - winnerPendingSinceMs > 5L * 60 * 1000)
@@ -2891,12 +2907,15 @@ public class ClanTurfPlugin extends Plugin
 			return; // not fetched from the server yet; try again next tick
 		}
 		pendingWinnerAnnounce = false;
-		String on = "<col=" + hex(ClanTurfColors.forClan(winner)) + ">";
-		String name = winner.toUpperCase(java.util.Locale.ROOT);
-		String msg = on + "[CT]" + RESET + " " + on + name + RESET + WHITE + " won the turf war on " + RESET
-				+ on + "World " + world + RESET + WHITE + "!" + RESET;
-		announceClan(msg);
-		fireTakeoverBarks(winner, true); // the GE crowd hails the day's winner (reuses the bark chorus + toggle)
+		if (wantChat)
+		{
+			String on = "<col=" + hex(ClanTurfColors.forClan(winner)) + ">";
+			String name = winner.toUpperCase(java.util.Locale.ROOT);
+			String msg = on + "[CT]" + RESET + " " + on + name + RESET + WHITE + " won the turf war on " + RESET
+					+ on + "World " + world + RESET + WHITE + "!" + RESET;
+			announceClan(msg);
+		}
+		fireTakeoverBarks(winner, true); // victory chorus; fireTakeoverBarks self-gates on the NPC bark toggle
 	}
 
 	/** RRGGBB hex for a colour, for chat {@code <col=...>} tags. */
