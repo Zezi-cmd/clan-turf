@@ -82,6 +82,8 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile List<ClanTurfPoint> cache = Collections.emptyList();
 	private volatile List<ClanTurfBattle> battles = Collections.emptyList();
 	private volatile long globalClaims; // all-time community total from /battles (0 until first poll)
+	// world -> turf-war winner (clan/alliance that owned the most tiles at the last reset), from /battles WIN lines.
+	private volatile Map<Integer, String> turfWinners = Collections.emptyMap();
 
 	// Alliance map from /alliances. clan(lower) -> 6-hex color, clan(lower) -> allianceId,
 	// allianceId -> member clan names (original case). Global, not per-world.
@@ -357,6 +359,7 @@ class HttpClanTurfStore implements ClanTurfStore
 			return;
 		}
 		List<ClanTurfBattle> list = new ArrayList<>();
+		Map<Integer, String> winners = new HashMap<>();
 		for (String line : body.split("\n"))
 		{
 			if (line.isBlank())
@@ -372,6 +375,22 @@ class HttpClanTurfStore implements ClanTurfStore
 				catch (NumberFormatException ignored)
 				{
 					// skip a malformed counter line
+				}
+				continue;
+			}
+			if (line.startsWith("WIN,"))
+			{
+				String[] w = line.split(",", 4); // WIN,world,tiles,name (name last, may contain spaces)
+				if (w.length == 4)
+				{
+					try
+					{
+						winners.put(Integer.parseInt(w[1].trim()), w[3]);
+					}
+					catch (NumberFormatException ignored)
+					{
+						// skip a malformed winner line
+					}
 				}
 				continue;
 			}
@@ -405,6 +424,13 @@ class HttpClanTurfStore implements ClanTurfStore
 			}
 		}
 		battles = list;
+		turfWinners = winners;
+	}
+
+	@Override
+	public String turfWinner(int world)
+	{
+		return turfWinners.get(world);
 	}
 
 	/** Pulls the global alliance map: which clans are teamed up and the shared color of each team. */

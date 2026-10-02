@@ -246,6 +246,13 @@ interface ClanTurfStore
 	{
 	}
 
+	/** The clan/alliance that owned the most tiles on {@code world} at the last daily reset (captured
+	 *  server-side just before the wipe), or null if unknown. Networked only; drives the reset winner ping. */
+	default String turfWinner(int world)
+	{
+		return null;
+	}
+
 	/** Force an immediate leaderboard poll (e.g. right after opting in), so the board isn't stale. */
 	default void refreshLeaderboard()
 	{

@@ -294,7 +294,7 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v5";
+	private static final String UPDATE_ID = "v6";
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
 	private static final boolean ALWAYS_SHOW_UPDATE = false;
@@ -305,31 +305,41 @@ public class ClanTurfPlugin extends Plugin
 	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
 	 *  all of them, so anyone who missed a login message can still read the history. */
 	private static final String[][] CHANGELOG = {
-		{"v5",
+		{"V6 - Cross-Device Sync",
+			"New: cross-device tile counts. Your daily and weekly totals now follow your account, so you can claim on one computer and continue on another. They add up on the server instead of one device overwriting the other. On a second device, just turn the Clan leaderboard opt-in on there too; settings are saved per device, so that switch only links the new device to your existing count and never submits anything twice.",
+			"New: turf-war winner at reset. When the daily reset hits, the clan tab posts who won the turf war on your world, and the Grand Exchange crowd hails the winner out loud. Built for events where whoever owns the turf at reset wins, so there's a clear result to screenshot.",
+			"Fixed: the GE owners line at the top no longer bounces to a second line as the stake percent changes.",
+			"Fixed: the side-panel section arrows now render correctly on macOS."},
+		{"V5 - PvP Indicators",
 			"Heads up: alliance overhead indicators are now hidden in the Wilderness and on PVP worlds (added in the last update), to follow Jagex's rules against scouting. We are exploring a limited opt-in way to show just the icon there, but it may stay off for good."},
-		{"v4",
+		{"V4 - Home Worlds",
 			"New: Alliance home worlds. Every alliance can now claim a home world. Set one when you create an alliance, or change it any time in Alliance Tools, Change home world.",
 			"Your alliance's home world shows under its name in the side panel and in the scoreboard drop-down.",
 			"A gold [HW] tag appears next to an alliance in Active Battles when the fight is on its own home world.",
 			"Alliances made before this update start with no home world. An owner just needs to set it once in Alliance Tools.",
 			"If they're opted in you can now see other players' alliance symbols and your clan's leaderboard without opting in yourself. The opt-in toggles only control whether your own symbol and tiles are shared.",
 			"New: Join the Clan Turf community server! Click the Discord icon next to the Online button to join."},
-		{"v3",
+		{"V3 - Indicators & Leaderboards",
 			"New: Alliance player indicators. Your alliance's symbol can float over allied players' heads so you can tell friend from foe anywhere.",
 			"Turn on Show player indicators in the Opt-In Features settings to see players from other clans. It opts you in: your name and alliance join a public roster, never your location, and you are removed the moment you turn it back off.",
 			"New: Clan leaderboards. Track your daily and weekly Grand Exchange tiles in the side panel, and turn on Clan leaderboard (also under Opt-In Features) to rank your clan for events.",
 			"The leaderboard is opt-in too: only your name, clan, and tile counts are shared, and turning it off removes you."},
-		{"v2",
+		{"V2 - Alliances",
 			"New: Alliances. Team up with other clans - allied tiles share one color and count as one team.",
 			"Owners and Admins of your clan can create an alliance with a passcode or join one, all from the side panel.",
 			"The clan that made the alliance can recolor it, remove clans, or disband it."},
-		{"v1",
+		{"V1 - Instant Login",
 			"Your clan now loads instantly on login - claim right away, no more 'join a clan' first.",
 			"New: update notes like this show in Game chat when Clan Turf updates. Toggle off in settings."},
 	};
-	// The newest version's lines drive the in-game changelog (single source of truth with the history above).
-	private static final String[] UPDATE_LINES =
-			java.util.Arrays.copyOfRange(CHANGELOG[0], 1, CHANGELOG[0].length);
+	// Short bullets for the in-game login message (kept brief on purpose). The side-panel "Changelog" dialog
+	// shows the full, detailed CHANGELOG above instead. Update this alongside CHANGELOG[0] each release.
+	private static final String[] UPDATE_SUMMARY = {
+		"Tile counts now sync across your devices (opt in on each one).",
+		"The turf-war winner is announced in the clan tab at reset.",
+		"Fixes: the top GE owners line, and the panel arrows on macOS.",
+	};
+	private static final String[] UPDATE_LINES = UPDATE_SUMMARY;
 
 	/** Set when we log in with an unseen update; the changelog fires on the next game tick, since chat
 	 *  isn't ready at the state-change event itself. */
@@ -370,6 +380,10 @@ public class ClanTurfPlugin extends Plugin
 	/** Previous countdown for the reset-moment detector (distinct from the ping baseline); paired
 	 * with dissolveFlashMs it lets the overlay start the tile dissolve when the daily wipe fires. */
 	private long resetDissolvePrevMs = -1L;
+	/** Armed at the reset moment; the winner ping fires once the server reports the world's winner (then clears).
+	 *  winnerPendingSinceMs times it out so a winner that never arrives doesn't announce much later. */
+	private boolean pendingWinnerAnnounce;
+	private long winnerPendingSinceMs;
 	/** Bumped when tiles are about to be wiped (daily reset or the Clear button) so the overlay
 	 * plays the staggered fade-out instead of a hard cut. */
 	private long dissolveFlashMs = 0L;
@@ -448,7 +462,7 @@ public class ClanTurfPlugin extends Plugin
 		panel.setAllianceIconLookup(serverStore::allianceIconByDisplay);
 		panel.setAllianceRosterLookup(serverStore::allianceMembersByDisplay);
 		panel.setAllianceHomeWorldLookup(serverStore::allianceHomeWorldByDisplay);
-		panel.setChangelog(changelogHtml());
+		panel.setChangelog(changelogHtml(), CHANGELOG[0][0]); // e.g. "V6 - Cross-Device Sync" for the dialog title
 		panel.setAllianceOwnerHandlers(this::kickAllianceClan, this::changeAllianceName,
 				this::changeAlliancePasscode, this::changeAllianceIcon, this::changeAllianceHomeWorld);
 		panel.setSlug(config.fullSlug());
@@ -941,6 +955,7 @@ public class ClanTurfPlugin extends Plugin
 		}
 
 		updateResetPings(nearGe);
+		maybeAnnounceWinner(nearGe);
 
 		// Daily reset moment (countdown wraps from ~0 back up to a full day) -> dissolve the tiles.
 		// Server mode only; local mode doesn't wipe at reset (the Clear button handles that case).
@@ -950,6 +965,8 @@ public class ClanTurfPlugin extends Plugin
 			if (resetDissolvePrevMs >= 0 && resetDissolvePrevMs < 30_000L && msReset > 60_000L)
 			{
 				triggerTileDissolve();
+				pendingWinnerAnnounce = true; // arm the winner ping; it fires once the server reports the winner
+				winnerPendingSinceMs = System.currentTimeMillis();
 			}
 			resetDissolvePrevMs = msReset;
 		}
@@ -2848,6 +2865,40 @@ public class ClanTurfPlugin extends Plugin
 		prevResetMs = ms;
 	}
 
+	/** After the daily reset, post "[CT] X won the turf war on World N!" once, naming the clan/alliance the
+	 *  server recorded as owning the most tiles at the wipe. Gated to near the GE and the reset-countdown
+	 *  toggle, like the warning pings. Waits (up to 5 minutes) for the winner to arrive on the next battles
+	 *  poll, so it fires with the server's authoritative result rather than this client's last-seen owner. */
+	private void maybeAnnounceWinner(boolean nearGe)
+	{
+		if (!pendingWinnerAnnounce || store != serverStore || !config.resetCountdown())
+		{
+			return;
+		}
+		if (System.currentTimeMillis() - winnerPendingSinceMs > 5L * 60 * 1000)
+		{
+			pendingWinnerAnnounce = false; // gave up: the winner never arrived in time
+			return;
+		}
+		if (!nearGe)
+		{
+			return; // only announce to players at the GE, like the countdown pings
+		}
+		int world = client.getWorld();
+		String winner = store.turfWinner(world);
+		if (winner == null)
+		{
+			return; // not fetched from the server yet; try again next tick
+		}
+		pendingWinnerAnnounce = false;
+		String on = "<col=" + hex(ClanTurfColors.forClan(winner)) + ">";
+		String name = winner.toUpperCase(java.util.Locale.ROOT);
+		String msg = on + "[CT]" + RESET + " " + on + name + RESET + WHITE + " won the turf war on " + RESET
+				+ on + "World " + world + RESET + WHITE + "!" + RESET;
+		announceClan(msg);
+		fireTakeoverBarks(winner, true); // the GE crowd hails the day's winner (reuses the bark chorus + toggle)
+	}
+
 	/** RRGGBB hex for a colour, for chat {@code <col=...>} tags. */
 	private static String hex(Color c)
 	{
@@ -3049,7 +3100,7 @@ public class ClanTurfPlugin extends Plugin
 		{
 			announceTakeover(newLeader);
 			fireTakeoverSound();
-			fireTakeoverBarks(newLeader);
+			fireTakeoverBarks(newLeader, false);
 		}
 		log.debug("Takeover: {} -> {}", previous, newLeader);
 	}
@@ -3061,7 +3112,7 @@ public class ClanTurfPlugin extends Plugin
 	 * which fires every other one so it doesn't become a solid wall of bubbles. One-shot on the event;
 	 * never looped. Runs on the client thread (called from the GameTick takeover path).
 	 */
-	private void fireTakeoverBarks(String newLeader)
+	private void fireTakeoverBarks(String newLeader, boolean victory)
 	{
 		if (newLeader == null || !config.npcBarks())
 		{
@@ -3109,7 +3160,7 @@ public class ClanTurfPlugin extends Plugin
 			}
 			long revealAt = now + java.util.concurrent.ThreadLocalRandom.current()
 					.nextLong(BARK_STAGGER_MS);
-			String[] pool = lorePool(nl);
+			String[] pool = victory ? VICTORY_BARKS : lorePool(nl);
 			String line = String.format(
 					pool[java.util.concurrent.ThreadLocalRandom.current().nextInt(pool.length)], clan);
 			barks.add(new Bark(npc, line, color, clan, revealAt, revealAt + BARK_MS));
@@ -3130,6 +3181,20 @@ public class ClanTurfPlugin extends Plugin
 	}
 
 	/** The lore-flavored bark pool for a GE NPC by (lower-cased) name; generic if unmatched. */
+	/** Shared victory barks for the daily reset winner (%s = winning clan/alliance, upper-cased). Used by
+	 *  fireTakeoverBarks in victory mode so the whole GE crowd hails the day's winner, distinct from the
+	 *  per-NPC takeover lines. */
+	private static final String[] VICTORY_BARKS = {
+		"%s won the day!",
+		"%s holds the Exchange!",
+		"All hail %s!",
+		"The turf belongs to %s!",
+		"%s are the champions!",
+		"Victory to %s!",
+		"%s ruled the Grand Exchange!",
+		"Long live %s!",
+	};
+
 	private String[] lorePool(String nl)
 	{
 		if (nl.startsWith("grand exchange clerk"))

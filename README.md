@@ -30,7 +30,7 @@ When a clan takes the GE lead, the boundary rises into a colored wall before set
 
 ## The crowd reacts
 
-Take the GE while you're standing in it and the whole cast of Grand Exchange NPCs calls it out overhead, each with lines that fit their character. The chatter appears in the game's overhead yellow with your clan's name picked out in its color, announced in a stagger rather than all at once. It only fires on an ownership flip, and nothing is ever posted to the chat box. Toggle it with **NPC takeover text**.
+Take the GE while you're standing in it and the whole cast of Grand Exchange NPCs calls it out overhead, each with lines that fit their character. The chatter appears in the game's overhead yellow with your clan's name picked out in its color, announced in a stagger rather than all at once. It only fires on an ownership flip, and nothing is ever posted to the chat box. The crowd also hails the winner at the daily reset. Toggle it with **NPC takeover text**.
 
 ![NPC takeover text](images/npcbark.png)
 
@@ -96,7 +96,7 @@ Type `!defend 307` or `!invade 420` in clan chat (`!def` and `!inv` also work) t
 
 ## Leaderboards
 
-Track how many Grand Exchange tiles you claim each day and week, and rank your clan for internal events. Your own daily and weekly counters live in the side panel's Leaderboards section, run locally, and reset on their own at 00:00 UTC (daily) and Monday 00:00 UTC (weekly).
+Track how many Grand Exchange tiles you claim each day and week, and rank your clan for internal events. Your own daily and weekly counters live in the side panel's Leaderboards section and reset on their own at 00:00 UTC (daily) and Monday 00:00 UTC (weekly). Opt into the clan leaderboard and your totals are stored on the server too, so they add up across devices: claim on one computer and continue on another. Settings are per device, so turn the opt-in on wherever you play.
 
 Everyone in your clan can view the board (opted in or not), sortable by daily or weekly total like the Active Battles list. Turn on the **Clan leaderboard** toggle in the Opt-In Features settings to add your own tiles to it: only opted-in players appear, only your name, clan, and tile counts are sent (never your location), and turning it off removes you. Your personal counter shows whether or not you opt in.
 
@@ -129,7 +129,7 @@ Flip the **Online/Offline** toggle at the top of the panel to Offline and Clan T
 
 ## Daily reset
 
-All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give you time to finish a battle, while the reset dissolves tiles in a staggered fade.
+All turf wipes daily at 00:00 UTC. An on-screen countdown and clan warnings give you time to finish a battle, while the reset dissolves tiles in a staggered fade. At the reset, the clan tab announces who held the most tiles on your world, the turf-war winner, and the Grand Exchange crowd hails them out loud. Useful for events where whoever owns the turf at reset wins, since there's a clear result to screenshot.
 
 ## Usage
 

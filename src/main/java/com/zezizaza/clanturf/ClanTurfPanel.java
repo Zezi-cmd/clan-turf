@@ -246,6 +246,7 @@ class ClanTurfPanel extends PluginPanel
 	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoard = java.util.Collections.emptyList();
 	private String lastLbSig = ""; // skip the rebuild (and its flicker) when nothing displayed has changed
 	private String changelogHtml = ""; // full version history HTML for the "What's New" dialog
+	private String changelogTitle = "Clan Turf - Changelog"; // dialog title; gains "- Current version: VN" via setChangelog
 	private boolean lbReady; // true once the first board poll has completed (else show "Loading")
 	private java.util.Map<String, javax.swing.Icon> lbRankIcons = java.util.Collections.emptyMap(); // name -> rank icon
 	private String lbClanName = ""; // your clan, shown above the board
@@ -2751,10 +2752,14 @@ class ClanTurfPanel extends PluginPanel
 		this.homeWorldLookup = f;
 	}
 
-	/** The plugin hands us the full version-history HTML for the "What's New" dialog. */
-	void setChangelog(String html)
+	/** The plugin hands us the full version-history HTML for the "What's New" dialog, plus the current version
+	 *  label (e.g. "V6") for the dialog title. */
+	void setChangelog(String html, String versionLabel)
 	{
 		this.changelogHtml = html == null ? "" : html;
+		this.changelogTitle = versionLabel == null || versionLabel.isEmpty()
+				? "Clan Turf - Changelog"
+				: "Clan Turf - Changelog - Current version: " + versionLabel;
 	}
 
 	/** Popup with every update note, newest first, for anyone who missed a login changelog. */
@@ -2777,7 +2782,7 @@ class ClanTurfPanel extends PluginPanel
 		// Build the dialog by hand instead of showMessageDialog so we can move it off the side panel -
 		// centered on this panel it lands on top of the sidebar. Nudge it left of the panel's left edge.
 		JOptionPane pane = new JOptionPane(scroll, JOptionPane.PLAIN_MESSAGE);
-		javax.swing.JDialog dialog = pane.createDialog(this, "Clan Turf - Changelog");
+		javax.swing.JDialog dialog = pane.createDialog(this, changelogTitle);
 		// Non-modal so it floats over the game without blocking clicks/camera behind it. Dispose when the user
 		// clicks OK (pane value changes) or closes the window; don't dispose right after showing, or a non-modal
 		// dialog would vanish instantly.
