@@ -141,8 +141,13 @@ class ClanTurfPanel extends PluginPanel
 	private static final int BATTLE_NAME_CLIP = 12;      // clip names in an Active-battles row
 	// Fixed column widths shared by the Active-battles header and every row, so the sort labels always line up
 	// over their columns no matter the clan-name lengths (owner column flexes and clips instead of shifting).
-	private static final int BATTLE_WORLD_COL_W = 58;    // world number (+ gold [HW] tag) column; wide enough for "W### [HW]"
+	private static final int BATTLE_WORLD_COL_W = 58;    // the whole World header column; split into number + HW-icon
+	private static final int BATTLE_WORLD_NUM_W = 36;    // "W###" number sub-column
+	private static final int BATTLE_HW_ICON_W = 20;      // home-world icon sub-column (blank when not a home world)
+	private static final int BATTLE_HW_ICON_PX = 16;     // rendered icon size inside that sub-column
 	private static final int BATTLE_TILES_COL_W = 44;    // right-aligned tile-count column
+	private javax.swing.ImageIcon hwIconCache;           // custom home-world icon for Active battles (lazy; may stay null)
+	private boolean hwIconLoaded;
 	private final JTextField nameField = new JTextField();
 	private final JLabel allianceNameLabel = new JLabel();
 	private final JTextField createPass = new JTextField();
@@ -237,13 +242,24 @@ class ClanTurfPanel extends PluginPanel
 	private boolean leaderboardOnline = false;
 
 	private enum LbSort { DAILY, WEEKLY }
+	private enum LbScope { ALL, CLAN } // ALL = every opted-in player server-wide; CLAN = just your clan
+
+	private static final int LB_PAGE_SIZE = 10; // rows per page (testing value; bump once pagination is proven)
+	// Podium colors for the top 3 leaderboard rows (used for both the 1px frame and the row text).
+	// Top-3 colors from RuneLite's Ground Items rarity palette (rarest = 1st): insane pink, low blue, medium green.
+	private static final Color MEDAL_FIRST = new Color(0xFF66B2);  // 1st - pink (insane tier)
+	private static final Color MEDAL_SECOND = new Color(0x66B2FF); // 2nd - blue
+	private static final Color MEDAL_THIRD = new Color(0x99FF99);  // 3rd - green
 
 	private LbSort lbSort = LbSort.DAILY;
+	private LbScope lbScope = LbScope.ALL; // default to the server-wide board
+	private int lbPage; // zero-based page index within the active board
 	private int lbDaily;
 	private int lbWeekly;
 	private boolean lbOptedIn;
 	private String lbMyName;
 	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoard = java.util.Collections.emptyList();
+	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoardAll = java.util.Collections.emptyList();
 	private String lastLbSig = ""; // skip the rebuild (and its flicker) when nothing displayed has changed
 	// {versionTitle, bodyHtml} per version, newest first, for the collapsible "What's New" dialog.
 	private java.util.List<String[]> changelogSections = java.util.Collections.emptyList();
@@ -1726,13 +1742,41 @@ class ClanTurfPanel extends PluginPanel
 		// Three fixed-position columns so the sort labels above always line up: world (+ [HW]) in a fixed-width
 		// WEST slot, the clan name(s) flexing in the CENTER (clipped, never shifting the columns), and the tile
 		// counts right-aligned in a fixed-width EAST slot. vs battles stack owner over runner-up in each column.
-		String hwWorld = isHomeBattle(b) ? "&nbsp;<span style='color:#ffd700'>[HW]</span>" : "";
-		// nobr so "W### [HW]" never wraps to a second line inside the fixed-width column (which would tear the row).
-		JLabel world = new JLabel("<html><nobr><b>W" + b.getWorld() + "</b>" + hwWorld + "</nobr></html>");
-		world.setFont(FontManager.getRunescapeSmallFont());
-		world.setForeground(Color.WHITE);
-		fixWidth(world, BATTLE_WORLD_COL_W);
-		row.add(world, BorderLayout.WEST);
+		// Column 1 = world number, column 2 = the home-world icon (blank unless this is a home world). Both sit in
+		// one fixed-width WEST slot matching the "World" sort header, so the Owner/Tiles columns never shift.
+		JPanel worldCol = new JPanel();
+		worldCol.setLayout(new BoxLayout(worldCol, BoxLayout.X_AXIS));
+		worldCol.setOpaque(false);
+		JLabel worldNum = new JLabel("<html><nobr><b>W" + b.getWorld() + "</b></nobr></html>");
+		worldNum.setFont(FontManager.getRunescapeSmallFont());
+		worldNum.setForeground(Color.WHITE);
+		worldNum.setAlignmentY(Component.CENTER_ALIGNMENT);
+		fixWidth(worldNum, BATTLE_WORLD_NUM_W);
+		worldCol.add(worldNum);
+
+		JLabel hwCell = new JLabel();
+		if (isHomeBattle(b))
+		{
+			javax.swing.ImageIcon hw = homeIcon();
+			if (hw != null)
+			{
+				hwCell.setIcon(hw);
+				hwCell.setToolTipText("Home world");
+			}
+			else
+			{
+				// Fallback only if the icon resource is missing: the old gold [HW] text.
+				hwCell.setText("<html><nobr><span style='color:#ffd700'>[HW]</span></nobr></html>");
+				hwCell.setFont(FontManager.getRunescapeSmallFont());
+			}
+		}
+		hwCell.setHorizontalAlignment(JLabel.CENTER);
+		hwCell.setAlignmentY(Component.CENTER_ALIGNMENT);
+		fixWidth(hwCell, BATTLE_HW_ICON_W);
+		worldCol.add(hwCell);
+
+		fixWidth(worldCol, BATTLE_WORLD_COL_W);
+		row.add(worldCol, BorderLayout.WEST);
 
 		String ownerName = "<span style='color:#" + ownerHex + "'>"
 				+ escape(clip(b.getOwner(), BATTLE_NAME_CLIP)) + "</span>";
@@ -1769,8 +1813,32 @@ class ClanTurfPanel extends PluginPanel
 		return row;
 	}
 
+	/** The custom home-world icon for the Active-battles HW column, loaded once and scaled. Null if the resource
+	 *  is missing or unreadable (rows then fall back to the gold [HW] text). */
+	private javax.swing.ImageIcon homeIcon()
+	{
+		if (!hwIconLoaded)
+		{
+			hwIconLoaded = true;
+			try
+			{
+				BufferedImage img = ImageUtil.loadImageResource(ClanTurfPanel.class, "homeworld_icon.png");
+				if (img != null)
+				{
+					hwIconCache = new javax.swing.ImageIcon(
+							ImageUtil.resizeImage(img, BATTLE_HW_ICON_PX, BATTLE_HW_ICON_PX));
+				}
+			}
+			catch (RuntimeException ignored)
+			{
+				// resource missing or unreadable - leave null; battle rows fall back to the [HW] text
+			}
+		}
+		return hwIconCache;
+	}
+
 	/** True if this battle's world is the home world of either participant (owner or runner-up), so the
-	 *  row can show a gold [HW] tag next to the world number without offsetting the clan names. */
+	 *  row shows the home-world icon next to the world number without offsetting the clan names. */
 	private boolean isHomeBattle(ClanTurfBattle b)
 	{
 		if (homeWorldLookup == null || b.getWorld() <= 0)
@@ -1926,7 +1994,8 @@ class ClanTurfPanel extends PluginPanel
 	 * row. Rebuilds the section.
 	 */
 	void updateLeaderboard(int daily, int weekly, boolean optedIn, boolean online,
-			java.util.List<ClanTurfStore.LeaderboardEntry> board, String myName, boolean ready,
+			java.util.List<ClanTurfStore.LeaderboardEntry> board,
+			java.util.List<ClanTurfStore.LeaderboardEntry> boardAll, String myName, boolean ready,
 			java.util.Map<String, javax.swing.Icon> rankIcons, String clanName, String dayWinner, String weekWinner)
 	{
 		lbDaily = daily;
@@ -1934,6 +2003,7 @@ class ClanTurfPanel extends PluginPanel
 		lbOptedIn = optedIn;
 		leaderboardOnline = online;
 		lbBoard = board == null ? java.util.Collections.emptyList() : board;
+		lbBoardAll = boardAll == null ? java.util.Collections.emptyList() : boardAll;
 		lbMyName = myName;
 		lbReady = ready;
 		lbRankIcons = rankIcons == null ? java.util.Collections.emptyMap() : rankIcons;
@@ -1945,13 +2015,37 @@ class ClanTurfPanel extends PluginPanel
 
 	private void renderLeaderboard()
 	{
+		// The active board depends on the scope tab: ALL = every opted-in player server-wide, CLAN = just yours.
+		java.util.List<ClanTurfStore.LeaderboardEntry> activeBoard = lbScope == LbScope.ALL ? lbBoardAll : lbBoard;
 		// Deterministic order (active period desc, then name) so an identical board from a differently-ordered
 		// poll produces the same signature and we skip the rebuild - otherwise the section flickers each poll.
-		java.util.List<ClanTurfStore.LeaderboardEntry> sorted = new ArrayList<>(lbBoard);
+		java.util.List<ClanTurfStore.LeaderboardEntry> sorted = new ArrayList<>(activeBoard);
 		sorted.sort(java.util.Comparator
 				.comparingLong((ClanTurfStore.LeaderboardEntry e) -> lbSort == LbSort.WEEKLY ? e.weekly : e.daily)
 				.reversed()
 				.thenComparing(e -> e.name == null ? "" : e.name.toLowerCase()));
+
+		// Show only players with at least one tile in the active period, so the board reflects activity rather than
+		// the full opt-in roster - an opted-in player who hasn't claimed today (or this week) stays off it.
+		java.util.List<ClanTurfStore.LeaderboardEntry> visible = new ArrayList<>();
+		for (ClanTurfStore.LeaderboardEntry e : sorted)
+		{
+			if ((lbSort == LbSort.WEEKLY ? e.weekly : e.daily) >= 1)
+			{
+				visible.add(e);
+			}
+		}
+
+		// Clamp the page in case the board shrank (opt-outs, period reset) or the scope/sort just changed.
+		int pageCount = Math.max(1, (visible.size() + LB_PAGE_SIZE - 1) / LB_PAGE_SIZE);
+		if (lbPage >= pageCount)
+		{
+			lbPage = pageCount - 1;
+		}
+		if (lbPage < 0)
+		{
+			lbPage = 0;
+		}
 
 		// Leaderboard hides at the login screen along with everything else - it needs a live session, not just
 		// server mode, to show. Gated on signedIn too, and signedIn is in the signature so logout re-renders.
@@ -1959,6 +2053,7 @@ class ClanTurfPanel extends PluginPanel
 
 		StringBuilder sig = new StringBuilder();
 		sig.append(lbShow).append('|').append(leaderboardCollapsed).append('|').append(lbSort)
+				.append('|').append(lbScope).append('|').append(lbPage)
 				.append('|').append(lbDaily).append('|').append(lbWeekly).append('|').append(lbOptedIn)
 				.append('|').append(lbReady).append('|').append(lbMyName).append('|').append(lbClanName)
 				.append('|').append(lbDayWinner).append('|').append(lbWeekWinner);
@@ -2004,17 +2099,28 @@ class ClanTurfPanel extends PluginPanel
 			return; // collapsed: only your personal line shows; the sort bar and board are hidden
 		}
 
-		// A divider sets your personal counter apart from the clan board below.
+		// A divider sets your personal counter apart from the board below.
 		leaderboardBox.add(Box.createVerticalStrut(6));
 		leaderboardBox.add(thinDivider());
 		leaderboardBox.add(Box.createVerticalStrut(6));
 
-		// Anyone can view the clan board; opting in only decides whether you are ON it. If you haven't opted
-		// in, show the board anyway with a nudge to join it.
+		// Scope tabs: All (every opted-in player server-wide) vs Clan (just yours). Sits above the board title.
+		JPanel scopeBar = new JPanel();
+		scopeBar.setLayout(new BoxLayout(scopeBar, BoxLayout.X_AXIS));
+		scopeBar.setOpaque(false);
+		scopeBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		scopeBar.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
+		scopeBar.add(lbScopeLabel("All", LbScope.ALL));
+		scopeBar.add(Box.createHorizontalStrut(12));
+		scopeBar.add(lbScopeLabel("Clan", LbScope.CLAN));
+		leaderboardBox.add(scopeBar);
+
+		// Anyone can view the board; opting in only decides whether you are ON it. If you haven't opted in,
+		// show the board anyway with a nudge to join it.
 		if (!lbOptedIn)
 		{
 			JLabel prompt = new JLabel("<html><body style='width:170px'>"
-					+ "Toggle Clan leaderboard on in Opt-In Features to add your tiles here.</body></html>");
+					+ "Toggle the leaderboard on in Opt-In Features to add your tiles here.</body></html>");
 			prompt.setFont(FontManager.getRunescapeSmallFont());
 			prompt.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 			prompt.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2022,19 +2128,27 @@ class ClanTurfPanel extends PluginPanel
 			leaderboardBox.add(Box.createVerticalStrut(4));
 		}
 
-		// "<Clan>'s Top Turfers:" (clan name and its possessive 's both in the clan color).
-		if (!lbClanName.isEmpty())
+		// Title: "Top Turfers:" server-wide, or "<Clan>'s Top Turfers:" (clan-colored possessive) for the Clan tab.
+		String titleHtml;
+		if (lbScope == LbScope.CLAN && !lbClanName.isEmpty())
 		{
 			String clanHex = hex(ClanTurfColors.forClan(lbClanName));
-			JLabel titleLbl = new JLabel("<html><body style='width:170px'><span style='color:#" + clanHex + "'>"
-					+ escape(lbClanName) + "'s</span> Top Turfers:</body></html>");
-			titleLbl.setFont(FontManager.getRunescapeFont());
-			titleLbl.setForeground(Color.WHITE);
-			titleLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-			titleLbl.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
-			leaderboardBox.add(titleLbl);
+			titleHtml = "<span style='color:#" + clanHex + "'>" + escape(lbClanName) + "'s</span> Top Turfers:";
+		}
+		else
+		{
+			titleHtml = "Top Turfers:";
+		}
+		JLabel titleLbl = new JLabel("<html><body style='width:170px'>" + titleHtml + "</body></html>");
+		titleLbl.setFont(FontManager.getRunescapeFont());
+		titleLbl.setForeground(Color.WHITE);
+		titleLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+		titleLbl.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
+		leaderboardBox.add(titleLbl);
 
-			// Previous period's winner (swaps with the Daily/Weekly sort); reads a muted "empty" until one exists.
+		// Previous period's winner is a per-clan stat, so it only shows on the Clan tab.
+		if (lbScope == LbScope.CLAN && !lbClanName.isEmpty())
+		{
 			String winner = lbSort == LbSort.WEEKLY ? lbWeekWinner : lbDayWinner;
 			String winnerCell = winner.isEmpty()
 					? "<span style='color:#" + gray + "'>empty</span>"
@@ -2066,10 +2180,15 @@ class ClanTurfPanel extends PluginPanel
 		leaderboardBox.add(thinDivider());
 		leaderboardBox.add(Box.createVerticalStrut(4));
 
-		if (lbBoard.isEmpty())
+		if (visible.isEmpty())
 		{
-			// Reached only when opted in (the not-opted-in case is gated above).
-			String msg = !lbReady ? "Loading leaderboards…" : "No one in your clan has opted in yet.";
+			// Reached only when opted in (the not-opted-in case is gated above). Distinguish "no one opted in" from
+			// "people are opted in but no one has any tiles this period yet" (the board hides zero-tile players).
+			String period = lbSort == LbSort.WEEKLY ? "this week" : "today";
+			String msg = !lbReady ? "Loading leaderboards…"
+					: !sorted.isEmpty() ? "No tiles claimed " + period + " yet."
+					: lbScope == LbScope.CLAN ? "No one in your clan has opted in yet."
+					: "No one has opted in yet.";
 			JLabel none = new JLabel("<html><body style='width:170px'>" + escape(msg) + "</body></html>");
 			none.setFont(FontManager.getRunescapeSmallFont());
 			none.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
@@ -2080,14 +2199,20 @@ class ClanTurfPanel extends PluginPanel
 			return;
 		}
 
-		int rank = 1;
-		for (ClanTurfStore.LeaderboardEntry e : sorted)
+		// One page of LB_PAGE_SIZE rows. Rank numbers are GLOBAL within the active board (page offset + index), so
+		// #1 is gold/bold only on the real top and page 2 continues at 11, not back at 1.
+		int from = lbPage * LB_PAGE_SIZE;
+		int to = Math.min(from + LB_PAGE_SIZE, visible.size());
+		for (int i = from; i < to; i++)
 		{
+			ClanTurfStore.LeaderboardEntry e = visible.get(i);
+			int rank = i + 1;
 			long v = lbSort == LbSort.WEEKLY ? e.weekly : e.daily;
-			boolean top = rank == 1; // only #1 is gold and bold; every other name is plain white
-			Color fg = top ? ColorScheme.BRAND_ORANGE : Color.WHITE;
+			// Podium (ranks 1-3) wears its medal color on the text; #1 is also bold. Everyone else is plain white.
+			Color medal = rank == 1 ? MEDAL_FIRST : rank == 2 ? MEDAL_SECOND : rank == 3 ? MEDAL_THIRD : null;
+			Color fg = medal != null ? medal : Color.WHITE;
 			java.awt.Font font = FontManager.getRunescapeSmallFont();
-			if (top)
+			if (rank == 1)
 			{
 				font = font.deriveFont(java.awt.Font.BOLD);
 			}
@@ -2097,7 +2222,7 @@ class ClanTurfPanel extends PluginPanel
 			row.setAlignmentX(Component.LEFT_ALIGNMENT);
 			row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
 
-			// rank number, then the clan-rank icon, then the name
+			// rank number, then the clan-rank icon (Clan tab only - the All tab is name-only), then the name
 			JPanel leftGroup = new JPanel();
 			leftGroup.setLayout(new BoxLayout(leftGroup, BoxLayout.X_AXIS));
 			leftGroup.setOpaque(false);
@@ -2108,7 +2233,7 @@ class ClanTurfPanel extends PluginPanel
 			leftGroup.add(num);
 			// One label carries the clan-rank icon AND the name, so Swing centers the icon to the text
 			// (a separate icon label sits low against the text's descender). Icon is null-safe here.
-			javax.swing.Icon ic = lbRankIcons.get(e.name);
+			javax.swing.Icon ic = lbScope == LbScope.CLAN ? lbRankIcons.get(e.name) : null;
 			JLabel nameL = new JLabel(e.name, ic, JLabel.LEFT);
 			nameL.setIconTextGap(3);
 			nameL.setFont(font);
@@ -2130,10 +2255,139 @@ class ClanTurfPanel extends PluginPanel
 
 			row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 			leaderboardBox.add(row);
-			rank++;
 		}
+
+		// Clickable page numbers, only when the board spans more than one page. A thin divider sets them off
+		// from the last row above.
+		if (pageCount > 1)
+		{
+			leaderboardBox.add(Box.createVerticalStrut(5));
+			leaderboardBox.add(thinDivider());
+			leaderboardBox.add(Box.createVerticalStrut(4));
+			leaderboardBox.add(buildLbPager(pageCount));
+		}
+
 		leaderboardBox.revalidate();
 		leaderboardBox.repaint();
+	}
+
+	/** One clickable scope tab (All / Clan) for the leaderboard. Switching resets to the first page. */
+	private JLabel lbScopeLabel(String text, LbScope key)
+	{
+		boolean active = lbScope == key;
+		JLabel l = new JLabel(text);
+		if (active)
+		{
+			l.setIcon(new TriangleIcon(TriangleIcon.DOWN, 7));
+			l.setHorizontalTextPosition(javax.swing.SwingConstants.LEFT);
+			l.setIconTextGap(3);
+		}
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setForeground(active ? ColorScheme.BRAND_ORANGE : ColorScheme.LIGHT_GRAY_COLOR);
+		l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		l.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (lbScope != key)
+				{
+					lbScope = key;
+					lbPage = 0;
+					renderLeaderboard();
+					revalidate();
+					repaint();
+				}
+			}
+		});
+		return l;
+	}
+
+	/** Row of clickable page numbers for the leaderboard (windowed with ellipses for long boards). */
+	private JPanel buildLbPager(int pageCount)
+	{
+		JPanel p = new JPanel();
+		p.setLayout(new BoxLayout(p, BoxLayout.X_AXIS));
+		p.setOpaque(false);
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+		p.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+		boolean first = true;
+		for (int pg : pagerPages(lbPage, pageCount))
+		{
+			if (!first)
+			{
+				p.add(Box.createHorizontalStrut(8));
+			}
+			first = false;
+			if (pg < 0)
+			{
+				JLabel gap = new JLabel("…");
+				gap.setFont(FontManager.getRunescapeSmallFont());
+				gap.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+				p.add(gap);
+				continue;
+			}
+			p.add(lbPageLabel(pg));
+		}
+		p.add(Box.createHorizontalGlue());
+		return p;
+	}
+
+	/** Page tokens to show: all of them when there are few, else first, last, and a window around the current
+	 *  page, with -1 marking an ellipsis gap. */
+	private java.util.List<Integer> pagerPages(int cur, int count)
+	{
+		java.util.List<Integer> out = new ArrayList<>();
+		if (count <= 7)
+		{
+			for (int i = 0; i < count; i++)
+			{
+				out.add(i);
+			}
+			return out;
+		}
+		out.add(0);
+		int lo = Math.max(1, cur - 1);
+		int hi = Math.min(count - 2, cur + 1);
+		if (lo > 1)
+		{
+			out.add(-1);
+		}
+		for (int i = lo; i <= hi; i++)
+		{
+			out.add(i);
+		}
+		if (hi < count - 2)
+		{
+			out.add(-1);
+		}
+		out.add(count - 1);
+		return out;
+	}
+
+	/** One clickable page number (1-based display; the active page is highlighted and inert). */
+	private JLabel lbPageLabel(int pg)
+	{
+		boolean active = pg == lbPage;
+		JLabel l = new JLabel(String.valueOf(pg + 1));
+		l.setFont(FontManager.getRunescapeSmallFont());
+		l.setForeground(active ? ColorScheme.BRAND_ORANGE : ColorScheme.LIGHT_GRAY_COLOR);
+		if (!active)
+		{
+			l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			l.addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mousePressed(MouseEvent e)
+				{
+					lbPage = pg;
+					renderLeaderboard();
+					revalidate();
+					repaint();
+				}
+			});
+		}
+		return l;
 	}
 
 	/** Date label for the active period: "Thu 17" for Daily, "Mon 21 - Sun 27" for the current UTC week. */
@@ -2171,6 +2425,7 @@ class ClanTurfPanel extends PluginPanel
 			public void mousePressed(MouseEvent e)
 			{
 				lbSort = key;
+				lbPage = 0; // a new sort reorders the board, so start from the first page
 				renderLeaderboard();
 				revalidate();
 				repaint();
@@ -2463,6 +2718,7 @@ class ClanTurfPanel extends PluginPanel
 		}
 		else if (inAlliance)
 		{
+			allianceStatus.setText(" "); // clear any stale offline message; the manage view needs no status line
 			allianceJoinCreate.setVisible(false);
 			allianceMemberPanel.setVisible(true);
 			allianceNameLabel.setText(name == null || name.isEmpty() ? "Your alliance" : name);
@@ -2499,6 +2755,7 @@ class ClanTurfPanel extends PluginPanel
 		else
 		{
 			// Not in an alliance: only Admin+ get the create/join controls.
+			allianceStatus.setText(" "); // clear any stale offline message before any read-only text below
 			allianceJoinCreate.setVisible(canManage);
 			allianceMemberPanel.setVisible(false);
 			if (!canManage)

@@ -393,11 +393,11 @@ public interface ClanTurfConfig extends Config
 	@ConfigItem(
 			keyName = "leaderboardOptIn",
 			section = optionalFeaturesSection,
-			name = "Clan leaderboard",
-			description = "Add your daily and weekly tile counts to your clan's leaderboard so clanmates can run "
-					+ "events. This OPTS YOU IN: your name, clan, and tile counts are sent to the server. Only "
-					+ "opted-in players appear on the board - turn it off to be removed. You can view your clan's "
-					+ "board either way, and your own tile counter always shows.",
+			name = "Leaderboard",
+			description = "Add your daily and weekly tile counts to the leaderboard. This OPTS YOU IN: your name, "
+					+ "clan, and tile counts are sent to the server and shown to ALL players on the plugin-wide"
+					+ "\"All\" board, as well as your clan's board. Only opted-in players appear - turn it off to be "
+					+ "removed. You can view the boards either way, and your own tile counter always shows.",
 			position = 1
 	)
 	default boolean leaderboardOptIn()

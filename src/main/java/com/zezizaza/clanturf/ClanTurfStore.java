@@ -226,6 +226,15 @@ interface ClanTurfStore
 		return Collections.emptyList();
 	}
 
+	/**
+	 * Every opted-in player across all clans (the server-wide "All" leaderboard), unsorted. Only the
+	 * networked store returns anything; local play has no shared board.
+	 */
+	default List<LeaderboardEntry> getAllLeaderboard()
+	{
+		return Collections.emptyList();
+	}
+
 	/** Publish this player's current daily/weekly tile totals to the leaderboard (opt-in). Networked only. */
 	default void leaderboardSubmit(String name, String clan, long daily, long weekly)
 	{

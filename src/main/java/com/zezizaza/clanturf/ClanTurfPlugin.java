@@ -294,7 +294,9 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v6";
+	private static final String UPDATE_ID = "v7";
+	/** URL to the home-world icon resource, for inline display in the changelog dialog's [HWICON] token. */
+	private static final java.net.URL HW_ICON_URL = ClanTurfPlugin.class.getResource("homeworld_icon.png");
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
 	private static final boolean ALWAYS_SHOW_UPDATE = false;
@@ -305,6 +307,10 @@ public class ClanTurfPlugin extends Plugin
 	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
 	 *  all of them, so anyone who missed a login message can still read the history. */
 	private static final String[][] CHANGELOG = {
+		{"V7 - Leaderboard Expansion",
+			"New: plugin-wide leaderboard. The Leaderboards section now has All and Clan tabs. All is a global Top Turfers board of every opted-in player across every clan; Clan keeps your own clan's board with its rank icons. Opting in shows your name on the public All board, and only players with tiles this period appear - so you won't show unless you're opted-in and you've claimed tiles recently.",
+			"New: home-world icon [HWICON]. The gold [HW] tag in Active Battles is now this home-world icon, shown in its own column next to the world number.",
+			"Fixed: toggling the plugin off and back on while logged in now works - before, it bounced straight back off and you had to log out first."},
 		{"V6 - Cross-Device Sync",
 			"New: cross-device tile counts. Your daily and weekly totals now follow your account, so you can claim on one computer and continue on another. They add up on the server instead of one device overwriting the other. On a second device, just turn the Clan leaderboard opt-in on there too; settings are saved per device, so that switch only links the new device to your existing count and never submits anything twice.",
 			"New: turf-war winner at reset. When the daily reset hits, the clan tab posts who won the turf war on your world, and the Grand Exchange crowd hails the winner out loud. Built for events where whoever owns the turf at reset wins, so there's a clear result to screenshot.",
@@ -335,9 +341,9 @@ public class ClanTurfPlugin extends Plugin
 	// Short bullets for the in-game login message (kept brief on purpose). The side-panel "Changelog" dialog
 	// shows the full, detailed CHANGELOG above instead. Update this alongside CHANGELOG[0] each release.
 	private static final String[] UPDATE_SUMMARY = {
-		"Tile counts now sync across your devices (opt in on each one).",
-		"The turf-war winner is announced in the clan tab at reset.",
-		"Fixes: the top GE owners line, and the panel arrows on macOS.",
+		"New: a plugin-wide All leaderboard alongside your clan's.",
+		"New: a home-world icon in Active Battles, replacing the [HW] tag.",
+		"Fixed: toggling the plugin off and on again while logged in.",
 	};
 	private static final String[] UPDATE_LINES = UPDATE_SUMMARY;
 
@@ -503,7 +509,16 @@ public class ClanTurfPlugin extends Plugin
 		// login right away - no waiting for the clan channel.
 		ClanTurfColors.setColorblindMode(config.colorblindMode());
 		applyWhitelist();
-		refreshClaims();
+		// startUp() runs on the Swing/EDT thread when the plugin is toggled in settings - NOT the client thread.
+		// refreshClaims()'s logged-in path reads the clan channel and rank sprites, which must run on the client
+		// thread; calling it here throws and RuneLite silently disables the plugin, so toggling it back on while
+		// logged in insta-reverts to off (logging out first "fixed" it only because that path skips those reads).
+		// At the login screen the path is Swing-safe, so refresh directly there. When logged in, lastWorld was
+		// just reset to -1, so the next onGameTick (client thread) refreshes within a tick (~0.6s).
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			refreshClaims();
+		}
 
 		// If the plugin updated while already logged in, queue the changelog for the next tick.
 		if (client.getGameState() == GameState.LOGGED_IN && shouldShowUpdate())
@@ -1908,6 +1923,11 @@ public class ClanTurfPlugin extends Plugin
 			int colon = line.indexOf(':'); // bold just the label up to and including the colon
 			line = "<b>" + line.substring(0, colon + 1) + "</b>" + line.substring(colon + 1);
 		}
+		// Inline the actual home-world icon where the [HWICON] token sits (JEditorPane loads it from the jar URL).
+		// Replace it before [HW] so the two tokens never collide. Drop the token if the resource is missing.
+		line = line.replace("[HWICON]", HW_ICON_URL != null
+				? "<img src='" + HW_ICON_URL + "' width=16 height=16>"
+				: "");
 		return line.replace("[HW]", "<span style='color:#ffd700'><b>[HW]</b></span>");
 	}
 
@@ -2973,11 +2993,14 @@ public class ClanTurfPlugin extends Plugin
 		Player me = client.getLocalPlayer();
 		String myName = me == null ? null : me.getName();
 		java.util.List<ClanTurfStore.LeaderboardEntry> board = getClanLeaderboard();
+		java.util.List<ClanTurfStore.LeaderboardEntry> boardAll = store.getAllLeaderboard(); // plugin-wide "All" tab
 		java.util.Map<String, javax.swing.Icon> icons = new java.util.HashMap<>();
 		ClanChannel ch = client.getClanChannel();
 		ClanSettings cs = client.getClanSettings();
 		if (ch != null && cs != null)
 		{
+			// Rank icons come from your own clan channel, so only clan-board names resolve; the All tab shows
+			// names without icons. Resolve for the clan board here.
 			for (ClanTurfStore.LeaderboardEntry e : board)
 			{
 				javax.swing.Icon ic = rankIcon(ch, cs, e.name);
@@ -2991,7 +3014,7 @@ public class ClanTurfPlugin extends Plugin
 		// here - displayClan() would collapse it to the alliance name like the scoreboard does.
 		String clan = effectiveClanName();
 		panel.updateLeaderboard(getLeaderboardDaily(), getLeaderboardWeekly(), config.leaderboardOptIn(),
-				store == serverStore, board, myName, store.leaderboardReady(), icons,
+				store == serverStore, board, boardAll, myName, store.leaderboardReady(), icons,
 				clan == null ? "" : clan, store.leaderboardDayWinner(clan), store.leaderboardWeekWinner(clan));
 	}
 

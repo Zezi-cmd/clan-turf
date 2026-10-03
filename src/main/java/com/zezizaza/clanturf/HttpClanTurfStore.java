@@ -653,6 +653,19 @@ class HttpClanTurfStore implements ClanTurfStore
 	}
 
 	@Override
+	public List<LeaderboardEntry> getAllLeaderboard()
+	{
+		// Flatten every clan's opted-in entries into one server-wide list. Each opt-in belongs to exactly one
+		// clan, so this is already de-duplicated by player. The panel sorts and paginates it.
+		List<LeaderboardEntry> all = new ArrayList<>();
+		for (List<LeaderboardEntry> l : leaderboardByClan.values())
+		{
+			all.addAll(l);
+		}
+		return all;
+	}
+
+	@Override
 	public void leaderboardSubmit(String name, String clan, long daily, long weekly)
 	{
 		ScheduledExecutorService e = exec;
