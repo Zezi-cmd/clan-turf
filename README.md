@@ -56,7 +56,7 @@ The side panel ranks every clan on your world by tiles held, with each clan's sh
 
 ## Active battles
 
-The **Active battles** list in the side panel shows which worlds are contested, with the leading clan and closest rival for each world, so you know where to head next. Your current world always stays pinned at the top; click the **Tiles**, **World**, or **Owner** header to sort the rest, and click again to flip the direction.
+The **Active battles** list in the side panel shows which worlds are contested, with the leading clan and closest rival for each world, so you know where to head next. A colored bar along each row's bottom shows how that world's Grand Exchange is split between the owner and the closest rival. Your current world always stays pinned at the top; click the **Tiles**, **World**, or **Owner** header to sort the rest, and click again to flip the direction. The list shows ten worlds at a time with page numbers below.
 
 ![Active battles](images/activebattles.png)
 
@@ -80,7 +80,7 @@ The alliance symbol shows everywhere the alliance does: large above the name on 
 
 ### Home world
 
-Every alliance can claim a **home world**. Set it when you create the alliance (it defaults to your clan's in-game home world), or change it any time from **Alliance Tools > Change home world** in the side panel; only the owner clan's leadership can set it. Your alliance's home world shows under its name in the panel and in the scoreboard drop-down, and a gold **[HW]** tag appears beside an alliance in Active Battles whenever the fight is on its own home world, so you can spot who is defending home turf. Alliances made before this feature start with no home world until an owner sets one.
+Every alliance can claim a **home world**. Set it when you create the alliance (it defaults to your clan's in-game home world), or change it any time from **Alliance Tools > Change home world** in the side panel; only the owner clan's leadership can set it. Your alliance's home world shows under its name in the panel and in the scoreboard drop-down, and a home-world icon appears beside an alliance in Active Battles whenever the fight is on its own home world, so you can spot who is defending home turf. Alliances made before this feature start with no home world until an owner sets one.
 
 ### Player indicators
 
