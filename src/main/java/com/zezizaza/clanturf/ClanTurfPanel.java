@@ -124,6 +124,7 @@ class ClanTurfPanel extends PluginPanel
 	private boolean battleSortDesc = true;
 	private int battlePage; // zero-based page within the sorted (non-pinned) battle list
 	private boolean battlesCascadedOnce; // rows cascade only on the first render with data this session
+	private boolean battlesRecascadeRestOnly; // one-shot: next render cascades only the non-pinned rows (page flip)
 	private static final int BATTLE_PAGE_SIZE = 10; // worlds per page in Active Battles (pinned world is extra)
 	// Last data handed to updateBattles, so a header click can re-sort without waiting for the next poll.
 	private List<ClanTurfBattle> lastBattles = new ArrayList<>();
@@ -547,10 +548,10 @@ class ClanTurfPanel extends PluginPanel
 		top.add(battlesBox);
 		buildAllianceSection();
 		buildLeaderboardSection();
-		top.add(allianceHeader);
-		top.add(allianceBody);
 		top.add(leaderboardHeader);
 		top.add(leaderboardBox);
+		top.add(allianceHeader);
+		top.add(allianceBody);
 		top.add(globalHeader);
 		top.add(globalBox);
 
@@ -1604,7 +1605,11 @@ class ClanTurfPanel extends PluginPanel
 			{
 				// Cascade the rows the first time real battle rows render this session (same trigger the leaderboard
 				// uses), so it reliably plays on login - not only on the offline->online transition.
-				boolean cascade = !battlesCascadedOnce;
+				// cascadeAll = first load this session (pinned world + rest). cascadeRest = a page flip, where the
+				// pinned current-world row is unchanged, so only the non-pinned rows re-cascade.
+				boolean cascadeAll = !battlesCascadedOnce;
+				boolean cascadeRest = battlesRecascadeRestOnly;
+				battlesRecascadeRestOnly = false; // consume the one-shot page-flip flag
 				revealBattlesPending = false; // consume the online-transition hold flag
 				long base = System.currentTimeMillis() + REVEAL_BATTLES_DELAY;
 
@@ -1629,11 +1634,11 @@ class ClanTurfPanel extends PluginPanel
 				{
 					FadePanel row = battleRow(pinned, myClan, currentWorld);
 					battlesBox.add(row);
-					if (cascade)
+					if (cascadeAll) // on a page flip the pinned world is unchanged, so leave it in place
 					{
 						scheduleReveal(row, base + i * REVEAL_ROW_STAGGER);
+						i++;
 					}
-					i++;
 				}
 				battlesBox.add(battleSortHeader());
 				// Paginate the sorted (non-pinned) worlds, BATTLE_PAGE_SIZE per page, so the list stays compact
@@ -1653,11 +1658,11 @@ class ClanTurfPanel extends PluginPanel
 				{
 					FadePanel row = battleRow(rest.get(j), myClan, currentWorld);
 					battlesBox.add(row);
-					if (cascade)
+					if (cascadeAll || cascadeRest)
 					{
 						scheduleReveal(row, base + i * REVEAL_ROW_STAGGER); // top-down cascade
+						i++;
 					}
-					i++;
 				}
 				if (battlePages > 1)
 				{
@@ -1666,10 +1671,11 @@ class ClanTurfPanel extends PluginPanel
 					{
 						battlePage = pg;
 						lastBattlesSig = null; // force a rebuild at the new page
+						battlesRecascadeRestOnly = true; // re-cascade only the new page's rows, pinned world stays put
 						updateBattles(new ArrayList<>(lastBattles), lastBattlesMyClan, lastBattlesWorld);
 					}));
 				}
-				if (cascade)
+				if (cascadeAll)
 				{
 					// Line the community counter up to arrive just after the last rendered battle row.
 					revealCommunityAt = base + (long) i * REVEAL_ROW_STAGGER + REVEAL_COMMUNITY_GAP;
@@ -2443,6 +2449,7 @@ class ClanTurfPanel extends PluginPanel
 			leaderboardBox.add(buildPager(lbPage, pageCount, pg ->
 			{
 				lbPage = pg;
+				lbCascadedOnce = false; // re-cascade on a page change
 				renderLeaderboard();
 				revalidate();
 				repaint();
@@ -2569,6 +2576,7 @@ class ClanTurfPanel extends PluginPanel
 				{
 					lbScope = key;
 					lbPage = 0;
+					lbCascadedOnce = false; // re-cascade on an All/Clan tab switch
 					renderLeaderboard();
 					revalidate();
 					repaint();
@@ -2699,6 +2707,7 @@ class ClanTurfPanel extends PluginPanel
 			{
 				lbSort = key;
 				lbPage = 0; // a new sort reorders the board, so start from the first page
+				lbCascadedOnce = false; // re-cascade on a Daily/Weekly switch
 				renderLeaderboard();
 				revalidate();
 				repaint();

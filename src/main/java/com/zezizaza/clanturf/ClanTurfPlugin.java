@@ -55,6 +55,7 @@ import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.clan.ClanChannel;
 import net.runelite.api.clan.ClanChannelMember;
+import net.runelite.api.clan.ClanMember;
 import net.runelite.api.clan.ClanRank;
 import net.runelite.api.clan.ClanSettings;
 import net.runelite.api.clan.ClanTitle;
@@ -307,13 +308,14 @@ public class ClanTurfPlugin extends Plugin
 	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
 	 *  all of them, so anyone who missed a login message can still read the history. */
 	private static final String[][] CHANGELOG = {
-		{"V8 - Scoreboard Polish",
+		{"V8 - Board Polish",
 			"New: tile-share bars. Each Active Battles row now has a colored bar along its bottom showing how that world's Grand Exchange is split - the owner's color fills from the left by how much of the GE they hold, and a rival's from the right.",
 			"New: Active Battles pages. The list shows ten worlds at a time with page numbers below, so it stays tidy when a lot of worlds are being fought over. The world you're on always stays pinned at the top.",
 			"New: your Today and This week tile counts now show in your leaderboard medal color when you place top three (pink for first, blue for second, green for third).",
 			"New: the All leaderboard tab now shows the previous period's top turfer under the board, the same way the Clan tab shows your clan's previous winner.",
 			"New: the previous winner now shows the tile total they won with, for example Previous: ZeziZaZa - 1234.",
-			"Fixed: the leaderboard and Active Battles colors now follow the color-blind mode setting, like the rest of the plugin's colors."},
+			"Fixed: the leaderboard and Active Battles colors now follow the color-blind mode setting, like the rest of the plugin's colors.",
+			"Fixed: a clanmate's rank icon now shows on the Clan leaderboard even while they're offline, previously it only showed when they were online."},
 		{"V7 - Leaderboard Expansion",
 			"New: plugin-wide leaderboard. The Leaderboards section now has All and Clan tabs. All is a global Top Turfers board of every opted-in player across every clan; Clan keeps your own clan's board with its rank icons. Opting in shows your name on the public All board, and only players with tiles this period appear - so you won't show unless you're opted-in and you've claimed tiles recently.",
 			"New: home-world icon [HWICON]. The gold [HW] tag in Active Battles is now this home-world icon, shown in its own column next to the world number.",
@@ -3005,10 +3007,10 @@ public class ClanTurfPlugin extends Plugin
 		java.util.Map<String, javax.swing.Icon> icons = new java.util.HashMap<>();
 		ClanChannel ch = client.getClanChannel();
 		ClanSettings cs = client.getClanSettings();
-		if (ch != null && cs != null)
+		if (cs != null)
 		{
-			// Rank icons come from your own clan channel, so only clan-board names resolve; the All tab shows
-			// names without icons. Resolve for the clan board here.
+			// Rank icons come from your own clan roster, so only clan-board names resolve; the All tab shows
+			// names without icons. Resolve for the clan board here (ClanSettings covers offline members too).
 			for (ClanTurfStore.LeaderboardEntry e : board)
 			{
 				javax.swing.Icon ic = rankIcon(ch, cs, e.name);
@@ -3029,20 +3031,35 @@ public class ClanTurfPlugin extends Plugin
 				store.leaderboardDayWinnerValueAll(), store.leaderboardWeekWinnerValueAll());
 	}
 
-	/** The clan-rank icon for a member of your clan (null if they aren't in your loaded clan channel or the
-	 *  rank images haven't loaded yet - the icon then just appears on a later refresh). */
+	/** The clan-rank icon for a member of your clan (null if they aren't in your clan, their rank has no
+	 *  title, or the rank images haven't loaded yet - the icon then just appears on a later refresh).
+	 *  Ranks come from ClanSettings (the full member roster), so OFFLINE clanmates on the board still get
+	 *  their icon; the ClanChannel (online members only) is just a fallback if settings isn't loaded yet. */
 	private javax.swing.Icon rankIcon(ClanChannel ch, ClanSettings cs, String name)
 	{
-		if (name == null)
+		if (name == null || cs == null)
 		{
 			return null;
 		}
-		ClanChannelMember m = ch.findMember(name);
-		if (m == null)
+		ClanRank rank = null;
+		ClanMember sm = cs.findMember(name); // full roster, online or offline
+		if (sm != null)
+		{
+			rank = sm.getRank();
+		}
+		else if (ch != null)
+		{
+			ClanChannelMember cm = ch.findMember(name); // fallback: currently-online channel
+			if (cm != null)
+			{
+				rank = cm.getRank();
+			}
+		}
+		if (rank == null)
 		{
 			return null;
 		}
-		ClanTitle title = cs.titleForRank(m.getRank());
+		ClanTitle title = cs.titleForRank(rank);
 		if (title == null)
 		{
 			return null;
