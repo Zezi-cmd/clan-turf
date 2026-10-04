@@ -286,6 +286,18 @@ interface ClanTurfStore
 		return null;
 	}
 
+	/** The single plugin-wide top player for the just-ended day (All tab), or "" if unknown. Networked only. */
+	default String leaderboardDayWinnerAll()
+	{
+		return "";
+	}
+
+	/** The single plugin-wide top player for the just-ended week (All tab), or "" if unknown. Networked only. */
+	default String leaderboardWeekWinnerAll()
+	{
+		return "";
+	}
+
 	/** Start any background work (e.g. the sync poller). No-op for the local store. */
 	default void start()
 	{

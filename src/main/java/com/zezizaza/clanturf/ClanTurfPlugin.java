@@ -294,7 +294,7 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v7";
+	private static final String UPDATE_ID = "v8";
 	/** URL to the home-world icon resource, for inline display in the changelog dialog's [HWICON] token. */
 	private static final java.net.URL HW_ICON_URL = ClanTurfPlugin.class.getResource("homeworld_icon.png");
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
@@ -307,6 +307,12 @@ public class ClanTurfPlugin extends Plugin
 	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
 	 *  all of them, so anyone who missed a login message can still read the history. */
 	private static final String[][] CHANGELOG = {
+		{"V8 - Scoreboard Polish",
+			"New: tile-share bars. Each Active Battles row now has a colored bar along its bottom showing how that world's Grand Exchange is split - the owner's color fills from the left by how much of the GE they hold, and a rival's from the right.",
+			"New: Active Battles pages. The list shows ten worlds at a time with page numbers below, so it stays tidy when a lot of worlds are being fought over. The world you're on always stays pinned at the top.",
+			"New: your Today and This week tile counts now show in your leaderboard medal color when you place top three (pink for first, blue for second, green for third).",
+			"New: the All leaderboard tab now shows the previous period's top turfer under the board, the same way the Clan tab shows your clan's previous winner.",
+			"Fixed: the leaderboard and Active Battles colors now follow the color-blind mode setting, like the rest of the plugin's colors."},
 		{"V7 - Leaderboard Expansion",
 			"New: plugin-wide leaderboard. The Leaderboards section now has All and Clan tabs. All is a global Top Turfers board of every opted-in player across every clan; Clan keeps your own clan's board with its rank icons. Opting in shows your name on the public All board, and only players with tiles this period appear - so you won't show unless you're opted-in and you've claimed tiles recently.",
 			"New: home-world icon [HWICON]. The gold [HW] tag in Active Battles is now this home-world icon, shown in its own column next to the world number.",
@@ -341,9 +347,9 @@ public class ClanTurfPlugin extends Plugin
 	// Short bullets for the in-game login message (kept brief on purpose). The side-panel "Changelog" dialog
 	// shows the full, detailed CHANGELOG above instead. Update this alongside CHANGELOG[0] each release.
 	private static final String[] UPDATE_SUMMARY = {
-		"New: a plugin-wide All leaderboard alongside your clan's.",
-		"New: a home-world icon in Active Battles, replacing the [HW] tag.",
-		"Fixed: toggling the plugin off and on again while logged in.",
+		"New: Active Battles tile-share bars and page numbers.",
+		"New: your tile counts show in your leaderboard medal color.",
+		"Fixed: the leaderboard colors now follow color-blind mode.",
 	};
 	private static final String[] UPDATE_LINES = UPDATE_SUMMARY;
 
@@ -1915,7 +1921,8 @@ public class ClanTurfPlugin extends Plugin
 			}
 			else
 			{
-				line = "<b>" + line + "</b>";
+				int colon = line.indexOf(':'); // no short lead-in sentence: bold just the "New:" label
+				line = "<b>" + line.substring(0, colon + 1) + "</b>" + line.substring(colon + 1);
 			}
 		}
 		else if (line.startsWith("Fixed:") || line.startsWith("Hot Fix:"))
@@ -3015,7 +3022,8 @@ public class ClanTurfPlugin extends Plugin
 		String clan = effectiveClanName();
 		panel.updateLeaderboard(getLeaderboardDaily(), getLeaderboardWeekly(), config.leaderboardOptIn(),
 				store == serverStore, board, boardAll, myName, store.leaderboardReady(), icons,
-				clan == null ? "" : clan, store.leaderboardDayWinner(clan), store.leaderboardWeekWinner(clan));
+				clan == null ? "" : clan, store.leaderboardDayWinner(clan), store.leaderboardWeekWinner(clan),
+				store.leaderboardDayWinnerAll(), store.leaderboardWeekWinnerAll());
 	}
 
 	/** The clan-rank icon for a member of your clan (null if they aren't in your loaded clan channel or the

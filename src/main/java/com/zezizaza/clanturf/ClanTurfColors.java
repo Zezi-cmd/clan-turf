@@ -61,6 +61,13 @@ final class ClanTurfColors
 		colorblind = mode == null ? ColorblindMode.NONE : mode;
 	}
 
+	/** Apply the active color-blindness transform to an arbitrary fixed color (e.g. the leaderboard medal colors),
+	 *  so it shifts with the toggle the same way clan colors do. NONE returns the color unchanged. */
+	static Color colorblind(Color c)
+	{
+		return c == null ? null : adjust(c);
+	}
+
 	/** Pin a clan to a fixed color (local override). */
 	static void setOverride(String clanName, Color color)
 	{

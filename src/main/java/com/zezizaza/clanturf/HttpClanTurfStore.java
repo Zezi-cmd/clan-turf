@@ -101,6 +101,8 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile Map<String, List<LeaderboardEntry>> leaderboardByClan = Collections.emptyMap(); // clan(lc) -> entries
 	private volatile Map<String, String> dayWinnerByClan = Collections.emptyMap();  // clan(lc) -> yesterday's winner
 	private volatile Map<String, String> weekWinnerByClan = Collections.emptyMap(); // clan(lc) -> last week's winner
+	private volatile String dayWinnerAll = "";  // plugin-wide previous daily winner (All tab)
+	private volatile String weekWinnerAll = ""; // plugin-wide previous weekly winner (All tab)
 	private volatile boolean leaderboardLoaded; // true after the first successful /leaderboard poll
 
 	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
@@ -576,6 +578,8 @@ class HttpClanTurfStore implements ClanTurfStore
 		Map<String, List<LeaderboardEntry>> next = new HashMap<>();
 		Map<String, String> nextDay = new HashMap<>();
 		Map<String, String> nextWeek = new HashMap<>();
+		String nextDayAll = "";  // plugin-wide (All tab) previous winners
+		String nextWeekAll = "";
 		for (String line : body.split("\n"))
 		{
 			if (line.isBlank())
@@ -608,6 +612,14 @@ class HttpClanTurfStore implements ClanTurfStore
 					nextDay.put(f[2].toLowerCase(), f[1]);
 				}
 			}
+			else if (line.startsWith("WDALL,"))
+			{
+				nextDayAll = line.substring("WDALL,".length()).trim(); // plugin-wide daily winner (no clan)
+			}
+			else if (line.startsWith("WWALL,"))
+			{
+				nextWeekAll = line.substring("WWALL,".length()).trim(); // plugin-wide weekly winner (no clan)
+			}
 			else if (line.startsWith("WW,"))
 			{
 				String[] f = line.split(",", 3); // WW,name,clan
@@ -620,6 +632,8 @@ class HttpClanTurfStore implements ClanTurfStore
 		leaderboardByClan = next;
 		dayWinnerByClan = nextDay;
 		weekWinnerByClan = nextWeek;
+		dayWinnerAll = nextDayAll;
+		weekWinnerAll = nextWeekAll;
 		leaderboardLoaded = true;
 	}
 
@@ -633,6 +647,18 @@ class HttpClanTurfStore implements ClanTurfStore
 	public String leaderboardWeekWinner(String clan)
 	{
 		return clan == null ? null : weekWinnerByClan.get(clan.toLowerCase());
+	}
+
+	@Override
+	public String leaderboardDayWinnerAll()
+	{
+		return dayWinnerAll;
+	}
+
+	@Override
+	public String leaderboardWeekWinnerAll()
+	{
+		return weekWinnerAll;
 	}
 
 	@Override
