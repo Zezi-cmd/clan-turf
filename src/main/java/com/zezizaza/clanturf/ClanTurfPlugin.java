@@ -312,6 +312,7 @@ public class ClanTurfPlugin extends Plugin
 			"New: Active Battles pages. The list shows ten worlds at a time with page numbers below, so it stays tidy when a lot of worlds are being fought over. The world you're on always stays pinned at the top.",
 			"New: your Today and This week tile counts now show in your leaderboard medal color when you place top three (pink for first, blue for second, green for third).",
 			"New: the All leaderboard tab now shows the previous period's top turfer under the board, the same way the Clan tab shows your clan's previous winner.",
+			"New: the previous winner now shows the tile total they won with, for example Previous: ZeziZaZa - 1234.",
 			"Fixed: the leaderboard and Active Battles colors now follow the color-blind mode setting, like the rest of the plugin's colors."},
 		{"V7 - Leaderboard Expansion",
 			"New: plugin-wide leaderboard. The Leaderboards section now has All and Clan tabs. All is a global Top Turfers board of every opted-in player across every clan; Clan keeps your own clan's board with its rank icons. Opting in shows your name on the public All board, and only players with tiles this period appear - so you won't show unless you're opted-in and you've claimed tiles recently.",
@@ -3023,7 +3024,9 @@ public class ClanTurfPlugin extends Plugin
 		panel.updateLeaderboard(getLeaderboardDaily(), getLeaderboardWeekly(), config.leaderboardOptIn(),
 				store == serverStore, board, boardAll, myName, store.leaderboardReady(), icons,
 				clan == null ? "" : clan, store.leaderboardDayWinner(clan), store.leaderboardWeekWinner(clan),
-				store.leaderboardDayWinnerAll(), store.leaderboardWeekWinnerAll());
+				store.leaderboardDayWinnerAll(), store.leaderboardWeekWinnerAll(),
+				store.leaderboardDayWinnerValue(clan), store.leaderboardWeekWinnerValue(clan),
+				store.leaderboardDayWinnerValueAll(), store.leaderboardWeekWinnerValueAll());
 	}
 
 	/** The clan-rank icon for a member of your clan (null if they aren't in your loaded clan channel or the

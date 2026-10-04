@@ -283,6 +283,10 @@ class ClanTurfPanel extends PluginPanel
 	private String lbWeekWinner = ""; // last week's top player for your clan, else blank
 	private String lbDayWinnerAll = "";  // plugin-wide previous daily winner (All tab)
 	private String lbWeekWinnerAll = ""; // plugin-wide previous weekly winner (All tab)
+	private long lbDayWinnerVal;      // that day winner's tile total (0 = unknown, shown as "Name - 1234")
+	private long lbWeekWinnerVal;     // that week winner's tile total
+	private long lbDayWinnerAllVal;   // plugin-wide day winner's tile total
+	private long lbWeekWinnerAllVal;  // plugin-wide week winner's tile total
 
 	// "Community Claims": the all-time community counter, shown only in server mode, with a count-up
 	// animation each time the total ticks up.
@@ -1265,7 +1269,7 @@ class ClanTurfPanel extends PluginPanel
 	}
 
 	/** Set the community count text and color it by tier, so the number visibly climbs the ranks as the
-	 * community total grows (white -&gt; gold -&gt; green -&gt; cyan -&gt; purple -&gt; orange). */
+	 * community total grows (white -&gt; gold -&gt; orange -&gt; green -&gt; cyan -&gt; purple). */
 	private void showCount(long v)
 	{
 		globalCount.setText(fmt(v));
@@ -1278,19 +1282,19 @@ class ClanTurfPanel extends PluginPanel
 	{
 		if (n >= 100_000_000L)
 		{
-			return new Color(0xFF7A33); // 100M+  orange
+			return new Color(0xB84BFF); // 100M+  purple
 		}
 		if (n >= 50_000_000L)
 		{
-			return new Color(0xB84BFF); // 50M+   purple
+			return new Color(0x33D6EB); // 50M+   cyan
 		}
 		if (n >= 10_000_000L)
 		{
-			return new Color(0x33D6EB); // 10M+   cyan
+			return new Color(0x4BE04B); // 10M+   green
 		}
 		if (n >= 1_000_000L)
 		{
-			return new Color(0x4BE04B); // 1M+    green
+			return new Color(0xFF7A33); // 1M+    orange
 		}
 		if (n >= 100_000L)
 		{
@@ -2118,7 +2122,8 @@ class ClanTurfPanel extends PluginPanel
 			java.util.List<ClanTurfStore.LeaderboardEntry> board,
 			java.util.List<ClanTurfStore.LeaderboardEntry> boardAll, String myName, boolean ready,
 			java.util.Map<String, javax.swing.Icon> rankIcons, String clanName, String dayWinner, String weekWinner,
-			String dayWinnerAll, String weekWinnerAll)
+			String dayWinnerAll, String weekWinnerAll,
+			long dayWinnerVal, long weekWinnerVal, long dayWinnerAllVal, long weekWinnerAllVal)
 	{
 		lbDaily = daily;
 		lbWeekly = weekly;
@@ -2134,6 +2139,10 @@ class ClanTurfPanel extends PluginPanel
 		lbWeekWinner = weekWinner == null ? "" : weekWinner;
 		lbDayWinnerAll = dayWinnerAll == null ? "" : dayWinnerAll;
 		lbWeekWinnerAll = weekWinnerAll == null ? "" : weekWinnerAll;
+		lbDayWinnerVal = dayWinnerVal;
+		lbWeekWinnerVal = weekWinnerVal;
+		lbDayWinnerAllVal = dayWinnerAllVal;
+		lbWeekWinnerAllVal = weekWinnerAllVal;
 		renderLeaderboard();
 	}
 
@@ -2187,6 +2196,8 @@ class ClanTurfPanel extends PluginPanel
 				.append('|').append(lbReady).append('|').append(lbMyName).append('|').append(lbClanName)
 				.append('|').append(lbDayWinner).append('|').append(lbWeekWinner)
 				.append('|').append(lbDayWinnerAll).append('|').append(lbWeekWinnerAll)
+				.append('|').append(lbDayWinnerVal).append('|').append(lbWeekWinnerVal)
+				.append('|').append(lbDayWinnerAllVal).append('|').append(lbWeekWinnerAllVal)
 				.append('|').append(myDailyMedal).append('|').append(myWeeklyMedal)
 				// Color-blind mode proxy: when the toggle changes, the adjusted medal color changes, so the whole
 				// board (podium row colors included) re-renders to pick up the new transform.
@@ -2304,9 +2315,14 @@ class ClanTurfPanel extends PluginPanel
 			String winner = lbScope == LbScope.ALL
 					? (lbSort == LbSort.WEEKLY ? lbWeekWinnerAll : lbDayWinnerAll)
 					: (lbSort == LbSort.WEEKLY ? lbWeekWinner : lbDayWinner);
+			long winnerVal = lbScope == LbScope.ALL
+					? (lbSort == LbSort.WEEKLY ? lbWeekWinnerAllVal : lbDayWinnerAllVal)
+					: (lbSort == LbSort.WEEKLY ? lbWeekWinnerVal : lbDayWinnerVal);
 			String winnerCell = winner.isEmpty()
 					? "<span style='color:#" + gray + "'>empty</span>"
-					: escape(winner);
+					: escape(winner) + (winnerVal > 0
+							? " <span style='color:#" + gray + "'>-</span> " + fmt(winnerVal)
+							: "");
 			JLabel wLbl = new JLabel("<html><body style='width:170px'><span style='color:#" + gray + "'>"
 					+ "Previous: </span>" + winnerCell + "</body></html>");
 			wLbl.setFont(FontManager.getRunescapeSmallFont());

@@ -101,8 +101,12 @@ class HttpClanTurfStore implements ClanTurfStore
 	private volatile Map<String, List<LeaderboardEntry>> leaderboardByClan = Collections.emptyMap(); // clan(lc) -> entries
 	private volatile Map<String, String> dayWinnerByClan = Collections.emptyMap();  // clan(lc) -> yesterday's winner
 	private volatile Map<String, String> weekWinnerByClan = Collections.emptyMap(); // clan(lc) -> last week's winner
+	private volatile Map<String, Long> dayWinnerValByClan = Collections.emptyMap();  // clan(lc) -> that winner's tiles
+	private volatile Map<String, Long> weekWinnerValByClan = Collections.emptyMap(); // clan(lc) -> that winner's tiles
 	private volatile String dayWinnerAll = "";  // plugin-wide previous daily winner (All tab)
 	private volatile String weekWinnerAll = ""; // plugin-wide previous weekly winner (All tab)
+	private volatile long dayWinnerAllVal;  // plugin-wide previous daily winner's tiles (0 = unknown)
+	private volatile long weekWinnerAllVal; // plugin-wide previous weekly winner's tiles (0 = unknown)
 	private volatile boolean leaderboardLoaded; // true after the first successful /leaderboard poll
 
 	/** When the poller last started, and when the server last answered - drives connectionStatus(). */
@@ -578,8 +582,12 @@ class HttpClanTurfStore implements ClanTurfStore
 		Map<String, List<LeaderboardEntry>> next = new HashMap<>();
 		Map<String, String> nextDay = new HashMap<>();
 		Map<String, String> nextWeek = new HashMap<>();
+		Map<String, Long> nextDayVal = new HashMap<>();  // winning tile totals (WDC/WWC lines)
+		Map<String, Long> nextWeekVal = new HashMap<>();
 		String nextDayAll = "";  // plugin-wide (All tab) previous winners
 		String nextWeekAll = "";
+		long nextDayAllVal = 0;  // plugin-wide winning tile totals (WDALLC/WWALLC lines)
+		long nextWeekAllVal = 0;
 		for (String line : body.split("\n"))
 		{
 			if (line.isBlank())
@@ -628,12 +636,68 @@ class HttpClanTurfStore implements ClanTurfStore
 					nextWeek.put(f[2].toLowerCase(), f[1]);
 				}
 			}
+			else if (line.startsWith("WDC,"))
+			{
+				String[] f = line.split(",", 3); // WDC,count,clan - winning daily tile total
+				if (f.length >= 3)
+				{
+					try
+					{
+						nextDayVal.put(f[2].toLowerCase(), Long.parseLong(f[1].trim()));
+					}
+					catch (NumberFormatException ignored)
+					{
+						// name still shows without a count
+					}
+				}
+			}
+			else if (line.startsWith("WWC,"))
+			{
+				String[] f = line.split(",", 3); // WWC,count,clan - winning weekly tile total
+				if (f.length >= 3)
+				{
+					try
+					{
+						nextWeekVal.put(f[2].toLowerCase(), Long.parseLong(f[1].trim()));
+					}
+					catch (NumberFormatException ignored)
+					{
+						// name still shows without a count
+					}
+				}
+			}
+			else if (line.startsWith("WDALLC,"))
+			{
+				try
+				{
+					nextDayAllVal = Long.parseLong(line.substring("WDALLC,".length()).trim());
+				}
+				catch (NumberFormatException ignored)
+				{
+					// name still shows without a count
+				}
+			}
+			else if (line.startsWith("WWALLC,"))
+			{
+				try
+				{
+					nextWeekAllVal = Long.parseLong(line.substring("WWALLC,".length()).trim());
+				}
+				catch (NumberFormatException ignored)
+				{
+					// name still shows without a count
+				}
+			}
 		}
 		leaderboardByClan = next;
 		dayWinnerByClan = nextDay;
 		weekWinnerByClan = nextWeek;
+		dayWinnerValByClan = nextDayVal;
+		weekWinnerValByClan = nextWeekVal;
 		dayWinnerAll = nextDayAll;
 		weekWinnerAll = nextWeekAll;
+		dayWinnerAllVal = nextDayAllVal;
+		weekWinnerAllVal = nextWeekAllVal;
 		leaderboardLoaded = true;
 	}
 
@@ -659,6 +723,32 @@ class HttpClanTurfStore implements ClanTurfStore
 	public String leaderboardWeekWinnerAll()
 	{
 		return weekWinnerAll;
+	}
+
+	@Override
+	public long leaderboardDayWinnerValue(String clan)
+	{
+		Long v = clan == null ? null : dayWinnerValByClan.get(clan.toLowerCase());
+		return v == null ? 0 : v;
+	}
+
+	@Override
+	public long leaderboardWeekWinnerValue(String clan)
+	{
+		Long v = clan == null ? null : weekWinnerValByClan.get(clan.toLowerCase());
+		return v == null ? 0 : v;
+	}
+
+	@Override
+	public long leaderboardDayWinnerValueAll()
+	{
+		return dayWinnerAllVal;
+	}
+
+	@Override
+	public long leaderboardWeekWinnerValueAll()
+	{
+		return weekWinnerAllVal;
 	}
 
 	@Override

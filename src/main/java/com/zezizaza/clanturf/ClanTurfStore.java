@@ -298,6 +298,30 @@ interface ClanTurfStore
 		return "";
 	}
 
+	/** The tile total the clan's just-ended-day winner had, or 0 if unknown. Networked store only. */
+	default long leaderboardDayWinnerValue(String clan)
+	{
+		return 0;
+	}
+
+	/** The tile total the clan's just-ended-week winner had, or 0 if unknown. Networked store only. */
+	default long leaderboardWeekWinnerValue(String clan)
+	{
+		return 0;
+	}
+
+	/** The tile total the plugin-wide just-ended-day winner had (All tab), or 0 if unknown. Networked only. */
+	default long leaderboardDayWinnerValueAll()
+	{
+		return 0;
+	}
+
+	/** The tile total the plugin-wide just-ended-week winner had (All tab), or 0 if unknown. Networked only. */
+	default long leaderboardWeekWinnerValueAll()
+	{
+		return 0;
+	}
+
 	/** Start any background work (e.g. the sync poller). No-op for the local store. */
 	default void start()
 	{
