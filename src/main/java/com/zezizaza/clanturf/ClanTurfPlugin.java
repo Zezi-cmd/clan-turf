@@ -389,7 +389,6 @@ public class ClanTurfPlugin extends Plugin
 	private boolean lbLoaded;
 	private String lbOptedInName; // display name currently published to the leaderboard, else null
 	private boolean lbSeeded;     // true once this session has seeded existing local totals to the server on opt-in
-	private long lbReconcileSuppressUntilMs; // after a manual reset, ignore server pull-up until the opt-out lands
 
 	/** Daily turf reset (matches the server's default CLANTURF_RESET_HOUR). */
 	private static final int RESET_HOUR_UTC = 0;
@@ -487,7 +486,6 @@ public class ClanTurfPlugin extends Plugin
 		panel.setChangelog(changelogSections(), CHANGELOG[0][0]); // CHANGELOG[0][0] e.g. "V6 - Cross-Device Sync"
 		panel.setAllianceOwnerHandlers(this::kickAllianceClan, this::changeAllianceName,
 				this::changeAlliancePasscode, this::changeAllianceIcon, this::changeAllianceHomeWorld);
-		panel.setResetTilesHandler(this::resetLeaderboardTiles);
 		panel.setSlug(config.fullSlug());
 		panel.setEraser(config.eraser());
 		navButton = NavigationButton.builder()
@@ -1364,31 +1362,6 @@ public class ClanTurfPlugin extends Plugin
 		}
 	}
 
-	/** Hard reset of the local tile counts to 0 (shift-click the Your tiles counter). Also clears the server row
-	 *  if online, and clears the seed flag so a later opt-in seeds the clean 0 instead of a stale total. */
-	void resetLeaderboardTiles()
-	{
-		ensureLeaderboardLoaded();
-		lbDaily = 0;
-		lbWeekly = 0;
-		lbSeeded = false;
-		// Suppress the per-tick server pull-up briefly: the opt-out POST + refresh is async, so without this a
-		// GameTick in the gap would reconcile the still-cached inflated total straight back onto our fresh 0.
-		lbReconcileSuppressUntilMs = System.currentTimeMillis() + 15000L;
-		persistLeaderboardCounters();
-		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbSeeded", false);
-		if (store == serverStore)
-		{
-			Player me = client.getLocalPlayer();
-			if (me != null && me.getName() != null)
-			{
-				serverStore.leaderboardOptOut(me.getName()); // remove the (possibly inflated) server row
-				serverStore.refreshLeaderboard();
-			}
-		}
-		pushLeaderboardToPanel();
-	}
-
 	/** Count one genuine claim toward the daily and weekly totals, persist, and push if opted in. */
 	private void recordLeaderboardTile()
 	{
@@ -1449,10 +1422,6 @@ public class ClanTurfPlugin extends Plugin
 		if (store != serverStore || !config.leaderboardOptIn() || !config.useServer())
 		{
 			return;
-		}
-		if (System.currentTimeMillis() < lbReconcileSuppressUntilMs)
-		{
-			return; // just did a manual reset; don't pull the stale cached total back up before the opt-out lands
 		}
 		ensureLeaderboardLoaded();
 		rollLeaderboardPeriods();

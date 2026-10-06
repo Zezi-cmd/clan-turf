@@ -2328,18 +2328,6 @@ class ClanTurfPanel extends PluginPanel
 			mineLabel.setForeground(Color.WHITE);
 			mineLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 			mineLabel.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-			mineLabel.setToolTipText("Shift-click to reset your Today / This week tile counts to 0.");
-			mineLabel.addMouseListener(new MouseAdapter()
-			{
-				@Override
-				public void mousePressed(MouseEvent e)
-				{
-					if (e.isShiftDown() && onResetTiles != null)
-					{
-						onResetTiles.run();
-					}
-				}
-			});
 		}
 		Color dTarget = myDailyMedal != null ? myDailyMedal : Color.WHITE;
 		Color wTarget = myWeeklyMedal != null ? myWeeklyMedal : Color.WHITE;
@@ -3103,14 +3091,6 @@ class ClanTurfPanel extends PluginPanel
 		allianceBody.add(allianceStatus);
 		allianceBody.add(allianceJoinCreate);
 		allianceBody.add(allianceMemberPanel);
-	}
-
-	private Runnable onResetTiles; // shift-click "Your tiles" -> plugin zeroes the local + server leaderboard counts
-
-	/** Wire the "reset my tile counts" action (shift-click the Your tiles counter). */
-	void setResetTilesHandler(Runnable r)
-	{
-		onResetTiles = r;
 	}
 
 	/** Float a popup just to the left of the sidebar (same placement as the changelog), instead of centering it
