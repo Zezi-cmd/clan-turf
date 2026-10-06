@@ -295,7 +295,7 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v8";
+	private static final String UPDATE_ID = "v9";
 	/** URL to the home-world icon resource, for inline display in the changelog dialog's [HWICON] token. */
 	private static final java.net.URL HW_ICON_URL = ClanTurfPlugin.class.getResource("homeworld_icon.png");
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
@@ -308,8 +308,14 @@ public class ClanTurfPlugin extends Plugin
 	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
 	 *  all of them, so anyone who missed a login message can still read the history. */
 	private static final String[][] CHANGELOG = {
+		{"V9 - Alliance Icon Overhaul + UI Polish",
+			"New: alliance symbols are now shaded in your alliance's color instead of a flat wash. Each symbol keeps its black outline and is recolored pixel by pixel, so it reads like a proper crest wherever it shows.",
+			"New: creating or opting into an alliance plays a short evolve animation. A white silhouette grows and bursts into your alliance color. Creating a brand-new alliance plays the full white-to-color version; opting into one you already have plays the colored version.",
+			"New: the Grand Exchange takeover glow now flickers in time with the wall rising, tinted your alliance's color.",
+			"New look for the Leaderboards: rows now alternate light and dark for easier reading, your own row is marked with a colored stripe down its left edge, and the All/Clan, Today/This week, page, and column headers all share one clean tab style.",
+			"New look for Active Battles: each world is now a card with a vertical share bar down the left - two bars side by side when a world is contested, one when a clan holds it outright - and the text is larger and easier to read.",
+			"Fixed: color and symbol pickers now open beside the side panel instead of the middle of the screen."},
 		{"V8 - Board Polish",
-			"New: tile-share bars. Each Active Battles row now has a colored bar along its bottom showing how that world's Grand Exchange is split - the owner's color fills from the left by how much of the GE they hold, and a rival's from the right.",
 			"New: Active Battles pages. The list shows ten worlds at a time with page numbers below, so it stays tidy when a lot of worlds are being fought over. The world you're on always stays pinned at the top.",
 			"New: your Today and This week tile counts now show in your leaderboard medal color when you place top three (pink for first, blue for second, green for third).",
 			"New: the All leaderboard tab now shows the previous period's top turfer under the board, the same way the Clan tab shows your clan's previous winner.",
@@ -350,9 +356,9 @@ public class ClanTurfPlugin extends Plugin
 	// Short bullets for the in-game login message (kept brief on purpose). The side-panel "Changelog" dialog
 	// shows the full, detailed CHANGELOG above instead. Update this alongside CHANGELOG[0] each release.
 	private static final String[] UPDATE_SUMMARY = {
-		"New: Active Battles tile-share bars and page numbers.",
-		"New: your tile counts show in your leaderboard medal color.",
-		"Fixed: the leaderboard colors now follow color-blind mode.",
+		"New: alliance symbols are now shaded in your alliance color, with an evolve animation when you create or opt in.",
+		"New look for the Leaderboards and Active Battles - zebra rows, a stripe on your row, and vertical share bars.",
+		"The takeover glow now flickers with the wall in your alliance color.",
 	};
 	private static final String[] UPDATE_LINES = UPDATE_SUMMARY;
 
@@ -383,6 +389,7 @@ public class ClanTurfPlugin extends Plugin
 	private boolean lbLoaded;
 	private String lbOptedInName; // display name currently published to the leaderboard, else null
 	private boolean lbSeeded;     // true once this session has seeded existing local totals to the server on opt-in
+	private long lbReconcileSuppressUntilMs; // after a manual reset, ignore server pull-up until the opt-out lands
 
 	/** Daily turf reset (matches the server's default CLANTURF_RESET_HOUR). */
 	private static final int RESET_HOUR_UTC = 0;
@@ -480,6 +487,7 @@ public class ClanTurfPlugin extends Plugin
 		panel.setChangelog(changelogSections(), CHANGELOG[0][0]); // CHANGELOG[0][0] e.g. "V6 - Cross-Device Sync"
 		panel.setAllianceOwnerHandlers(this::kickAllianceClan, this::changeAllianceName,
 				this::changeAlliancePasscode, this::changeAllianceIcon, this::changeAllianceHomeWorld);
+		panel.setResetTilesHandler(this::resetLeaderboardTiles);
 		panel.setSlug(config.fullSlug());
 		panel.setEraser(config.eraser());
 		navButton = NavigationButton.builder()
@@ -633,6 +641,12 @@ public class ClanTurfPlugin extends Plugin
 			selectStore();
 			leaderInit = false;
 			committedLeader = null;
+			if (config.useServer())
+			{
+				// Coming online: pull alliance colors right away (normally a ~20s poll) so the battle and
+				// bar rows don't render in a placeholder color and then recolor to the alliance color.
+				serverStore.refreshAlliancesSoon();
+			}
 			applyWhitelist(); // switching online/offline changes whether the offline color list applies
 			refreshClaims();
 			syncRosterMembership(); // going online/offline changes whether we can publish the opt-in row
@@ -810,6 +824,16 @@ public class ClanTurfPlugin extends Plugin
 		return new ClanTurfStore.AllianceTag(hex, store.allianceIconOf(clan), store.allianceIdOf(clan));
 	}
 
+	/** When you last created an alliance (online or offline), so the overhead overlay knows to play the white
+	 *  -> color evolve on YOUR create specifically (a join or a clan-set-up symbol gets the colored one). */
+	private long allianceCreatedMs;
+
+	/** True for a short window after you create an alliance. Read once by the overlay when your symbol appears. */
+	boolean recentlyCreatedAlliance()
+	{
+		return allianceCreatedMs > 0 && System.currentTimeMillis() - allianceCreatedMs < 5000;
+	}
+
 	/**
 	 * A 0..1 pulse over the takeover-animation window, else 0. Drives the overhead capture sparkle. Everyone
 	 * sees it, same as the tile shimmer - {@link #capturedAllianceId()} says whose symbols should sparkle.
@@ -822,14 +846,40 @@ public class ClanTurfPlugin extends Plugin
 			return 0;
 		}
 		long el = System.currentTimeMillis() - start;
-		// Same window the overlay's takeover animation runs for.
-		long total = config.smallRiseMs() + config.smallFallMs() + config.fullRiseMs()
-				+ config.holdMs() + config.fallMs();
+		// Follow the wall's own choreography so the overhead glow FLICKERS on the same beats (and auto-tracks any
+		// change to the wall timings): brighten on the small rise, dip on the small fall, brighten on the full
+		// rise, hold bright, then fade on the final fall.
+		long d1 = config.smallRiseMs();
+		long d2 = config.smallFallMs();
+		long d3 = config.fullRiseMs();
+		long d4 = config.holdMs();
+		long d5 = config.fallMs();
+		long total = d1 + d2 + d3 + d4 + d5;
 		if (el <= 0 || el >= total)
 		{
 			return 0;
 		}
-		return Math.sin(Math.PI * (el / (double) total));
+		if (el < d1)
+		{
+			return d1 <= 0 ? 1.0 : el / (double) d1;                 // small rise: 0 -> 1
+		}
+		el -= d1;
+		if (el < d2)
+		{
+			return d2 <= 0 ? 0.0 : 1.0 - el / (double) d2;           // small fall: 1 -> 0 (the flicker dip)
+		}
+		el -= d2;
+		if (el < d3)
+		{
+			return d3 <= 0 ? 1.0 : el / (double) d3;                 // full rise: 0 -> 1
+		}
+		el -= d3;
+		if (el < d4)
+		{
+			return 1.0;                                             // hold: stay bright
+		}
+		el -= d4;
+		return d5 <= 0 ? 0.0 : 1.0 - el / (double) d5;              // final fall: 1 -> 0
 	}
 
 	/**
@@ -1248,8 +1298,9 @@ public class ClanTurfPlugin extends Plugin
 
 		// Leaderboard tile counters: count genuine gains only - a fresh or stolen tile, the same 'gain' rule
 		// the community counter uses - so dancing on your own turf doesn't inflate it. Full Slug is a drawing
-		// tool, not a run, so it never touches the numbers either.
-		if (gain && !isSlugPainting())
+		// tool, not a run, so it never touches the numbers either. ONLINE ONLY: offline is a sandbox where you
+		// paint as test clans, so those claims must never count toward your real leaderboard total.
+		if (gain && !isSlugPainting() && store == serverStore)
 		{
 			recordLeaderboardTile();
 		}
@@ -1282,6 +1333,9 @@ public class ClanTurfPlugin extends Plugin
 		lbWeekly = config.lbWeeklyTiles();
 		lbDay = config.lbDay();
 		lbWeek = config.lbWeek();
+		// Persisted so the one-time opt-in seed stays "done" across logins. Was session-only, which re-seeded the
+		// server (an additive leaderboardAdd) on every login and doubled the total each session.
+		lbSeeded = Boolean.parseBoolean(configManager.getConfiguration(ConfigClanTurfStore.GROUP, "lbSeeded"));
 		lbLoaded = true;
 		rollLeaderboardPeriods();
 	}
@@ -1308,6 +1362,31 @@ public class ClanTurfPlugin extends Plugin
 		{
 			persistLeaderboardCounters();
 		}
+	}
+
+	/** Hard reset of the local tile counts to 0 (shift-click the Your tiles counter). Also clears the server row
+	 *  if online, and clears the seed flag so a later opt-in seeds the clean 0 instead of a stale total. */
+	void resetLeaderboardTiles()
+	{
+		ensureLeaderboardLoaded();
+		lbDaily = 0;
+		lbWeekly = 0;
+		lbSeeded = false;
+		// Suppress the per-tick server pull-up briefly: the opt-out POST + refresh is async, so without this a
+		// GameTick in the gap would reconcile the still-cached inflated total straight back onto our fresh 0.
+		lbReconcileSuppressUntilMs = System.currentTimeMillis() + 15000L;
+		persistLeaderboardCounters();
+		configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbSeeded", false);
+		if (store == serverStore)
+		{
+			Player me = client.getLocalPlayer();
+			if (me != null && me.getName() != null)
+			{
+				serverStore.leaderboardOptOut(me.getName()); // remove the (possibly inflated) server row
+				serverStore.refreshLeaderboard();
+			}
+		}
+		pushLeaderboardToPanel();
 	}
 
 	/** Count one genuine claim toward the daily and weekly totals, persist, and push if opted in. */
@@ -1371,6 +1450,10 @@ public class ClanTurfPlugin extends Plugin
 		{
 			return;
 		}
+		if (System.currentTimeMillis() < lbReconcileSuppressUntilMs)
+		{
+			return; // just did a manual reset; don't pull the stale cached total back up before the opt-out lands
+		}
 		ensureLeaderboardLoaded();
 		rollLeaderboardPeriods();
 		String clan = effectiveClanName();
@@ -1431,6 +1514,7 @@ public class ClanTurfPlugin extends Plugin
 				// total another device already built. A fresh install seeds 0/0, a no-op.
 				serverStore.leaderboardAdd(name, clan, lbDaily, lbWeekly);
 				lbSeeded = true;
+				configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbSeeded", true);
 			}
 			serverStore.refreshLeaderboard();
 			lbOptedInName = name;
@@ -1442,6 +1526,7 @@ public class ClanTurfPlugin extends Plugin
 			// lbSeeded lets a later opt-in re-seed, since opt-out deletes our server row.
 			lbOptedInName = null;
 			lbSeeded = false;
+			configManager.setConfiguration(ConfigClanTurfStore.GROUP, "lbSeeded", false);
 			serverStore.leaderboardOptOut(name);
 			serverStore.refreshLeaderboard();
 		}
@@ -1928,7 +2013,7 @@ public class ClanTurfPlugin extends Plugin
 				line = "<b>" + line.substring(0, colon + 1) + "</b>" + line.substring(colon + 1);
 			}
 		}
-		else if (line.startsWith("Fixed:") || line.startsWith("Hot Fix:"))
+		else if (line.startsWith("Fixed:") || line.startsWith("Hot Fix:") || line.startsWith("New look"))
 		{
 			int colon = line.indexOf(':'); // bold just the label up to and including the colon
 			line = "<b>" + line.substring(0, colon + 1) + "</b>" + line.substring(colon + 1);
@@ -2218,6 +2303,7 @@ public class ClanTurfPlugin extends Plugin
 					}
 					panel.setAllianceStatus("Alliance created. Passcode: "
 							+ (f.length >= 3 ? f[2] : "?"));
+					allianceCreatedMs = System.currentTimeMillis(); // your own create -> white->color evolve
 					serverStore.refreshAlliancesSoon();
 				}
 				else

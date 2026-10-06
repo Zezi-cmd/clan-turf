@@ -62,6 +62,17 @@ class ClanTurfAllianceOverlay extends Overlay
 	private double fade; // 0..1, eases toward "should the symbols be showing at all"
 	private long lastRenderMs; // for a time-based fade that doesn't depend on frame rate
 
+	// Opt-in "evolve" flourish: when YOU tick "Share my symbol", your own overhead symbol does a short
+	// grow/shake/pulse then pops into full color with a glow (local player only). See the v9 style guide.
+	private static final long EVOLVE_MS = 1600;
+	private boolean optInInit;   // seed prevOptIn from the current setting on the first render (no flourish on login)
+	private boolean prevOptIn;   // last-seen "Share my symbol" value, to catch the off -> on transition
+	private boolean hadTagInit;  // seed prevHadTag on the first render (no flourish for an alliance you already had)
+	private boolean prevHadTag;  // whether you had an alliance symbol last render, to catch none -> present (created/joined)
+	private long evolveStartMs;  // when the current evolve started (0 = none / finished)
+	private boolean evolveWhite; // true = white->color (your own create); false = colored only (opt-in / already set up)
+	private final Map<BufferedImage, BufferedImage> whiteCache = new HashMap<>(); // colored symbol -> white silhouette
+
 	private final Client client;
 	private final ClanTurfPlugin plugin;
 	private final ClanTurfConfig config;
@@ -101,7 +112,39 @@ class ClanTurfAllianceOverlay extends Overlay
 		long nowMs = System.currentTimeMillis();
 		double dt = lastRenderMs == 0 ? 16.0 : Math.min(200.0, nowMs - lastRenderMs);
 		lastRenderMs = nowMs;
-		boolean visible = plugin.isNearGe() || !config.hideIndicatorsOutsideGe();
+
+		// Detect the local player ticking "Share my symbol" (off -> on) and start the evolve flourish. Seed the
+		// previous value on the first render so being opted-in at login doesn't fire it.
+		boolean optIn = config.showPlayerIndicators();
+		if (!optInInit)
+		{
+			prevOptIn = optIn;
+			optInInit = true;
+		}
+		if (optIn && !prevOptIn)
+		{
+			evolveStartMs = nowMs;
+			evolveWhite = false; // opting in (symbol may already exist) plays the COLORED animation
+		}
+		prevOptIn = optIn;
+
+		// Also fire the flourish when your own alliance symbol first appears. Only YOUR OWN create plays the
+		// white -> color evolve; a symbol your clan set up (or a join) just gets the colored animation.
+		boolean hasTag = plugin.myAllianceTag() != null;
+		if (!hadTagInit)
+		{
+			prevHadTag = hasTag;
+			hadTagInit = true;
+		}
+		if (hasTag && !prevHadTag)
+		{
+			evolveStartMs = nowMs;
+			evolveWhite = plugin.recentlyCreatedAlliance();
+		}
+		prevHadTag = hasTag;
+		// Alliance symbols are an online-only feature: offline, fade them all out (including your own clan's).
+		boolean visible = config.useServer()
+				&& (plugin.isNearGe() || !config.hideIndicatorsOutsideGe());
 		fade = Math.max(0.0, Math.min(1.0, fade + (visible ? dt : -dt) / FADE_MS));
 		if (fade <= 0.0)
 		{
@@ -142,10 +185,11 @@ class ClanTurfAllianceOverlay extends Overlay
 			}
 			Color color = decodeColor(tag.colorHex);
 			// Sparkle the conquering alliance's symbols during a takeover: brighten their own color (not white),
-			// pulsing up then back. Fires on a gain and is seen by everyone.
-			if (color != null && flashAid != null && flashAid.equals(tag.allianceId))
+			// flickering on the wall beats. Fires on a gain and is seen by everyone.
+			boolean flashing = color != null && flashAid != null && flashAid.equals(tag.allianceId);
+			if (flashing)
 			{
-				symbol = flashed(symbol, color, (float) pulse);
+				symbol = flashed(symbol, (float) pulse);
 			}
 			// Symbol only, no name - so it never collides with Player Indicators or the game's nameplates.
 			// Float it a fixed pixel gap above where the name line would sit, so the gap holds at any zoom
@@ -157,8 +201,27 @@ class ClanTurfAllianceOverlay extends Overlay
 				continue;
 			}
 			int symY = namePt.getY() - graphics.getFontMetrics().getAscent() - SYMBOL_SIZE - 2;
-			graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, symbolAlpha));
-			graphics.drawImage(symbol, imgPt.getX(), symY, null);
+			long evolveElapsed = nowMs - evolveStartMs;
+			if (isSelf && evolveStartMs > 0 && evolveElapsed < EVOLVE_MS)
+			{
+				// Your own symbol plays the opt-in evolve flourish instead of the plain draw.
+				Color evColor = color != null ? color : Color.WHITE;
+				renderEvolve(graphics, symbol, imgPt.getX() + symbol.getWidth() / 2,
+						symY + symbol.getHeight() / 2, evolveElapsed, symbolAlpha, evColor);
+			}
+			else
+			{
+				if (flashing)
+				{
+					// A small white glow behind the symbol, flickering on the same wall beat as the brighten.
+					double cx = imgPt.getX() + symbol.getWidth() / 2.0;
+					double cy = symY + symbol.getHeight() / 2.0;
+					// Takeover glow is the alliance's own color (white is only for the create/opt-in evolve).
+					drawGlow(graphics, cx, cy, symbol.getWidth() * 0.9 + pulse * 8.0, pulse * 0.45, symbolAlpha, color);
+				}
+				graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, symbolAlpha));
+				graphics.drawImage(symbol, imgPt.getX(), symY, null);
+			}
 
 			// Optionally the name too (at full opacity - the slider is symbol-only), but only for players
 			// Player Indicators (or your own friend/clan/team relationships) isn't already naming.
@@ -194,29 +257,191 @@ class ClanTurfAllianceOverlay extends Overlay
 		{
 			return null; // sprite not loaded yet; the scene repaints so it lands next frame
 		}
-		BufferedImage out = ClanTurfColors.tintSymbol(raw, color, SYMBOL_SIZE, ClanTurfColors.SYMBOL_TINT_ALPHA);
+		BufferedImage out = ClanTurfColors.recolorSymbol(raw, color, SYMBOL_SIZE);
 		tintCache.put(key, out);
 		return out;
+	}
+
+	/**
+	 * The opt-in evolve flourish (local player only): 0-1.0s a white silhouette grows, shakes and pulses faster
+	 * and faster over a soft glow; at 1.0s it pops (slight overshoot) into full color and the white overlay +
+	 * glow fade out by 1.6s. Driven entirely by {@code elapsed}, no timers.
+	 */
+	private void renderEvolve(Graphics2D g, BufferedImage colored, int cx, int cy, long elapsed, float baseAlpha,
+			Color allianceColor)
+	{
+		double t = elapsed / 1000.0; // seconds
+		double scale;
+		double shakeX;
+		double whiteAlpha;
+		double glowAlpha;
+		double glowRadius;
+		if (t < 1.0)
+		{
+			double grow = t < 0.18 ? easeOut(t / 0.18) : 1.0;
+			double pulse = 1.0 + 0.12 * Math.sin(t * t * 40.0) * (0.4 + t); // speeds up and grows across the second
+			scale = grow * pulse;
+			shakeX = Math.sin(t * 45.0) * 2.0; // slower, slightly gentler wobble
+			// Start pure white and tint toward the alliance color across the shake (stays white early via the
+			// >1 power, colors up toward the pop); the pop finishes the last sliver of white.
+			whiteAlpha = 1.0 - Math.pow(t, 1.6) * 0.8;
+			glowAlpha = 0.55;
+			glowRadius = 26.0 + 14.0 * t; // 26 -> 40
+		}
+		else
+		{
+			double tp = t - 1.0;
+			double prog = tp < 0.30 ? backOut(tp / 0.30) : 1.0; // 1.45 settles to 1.0 with a slight overshoot
+			scale = 1.45 - 0.45 * prog;
+			whiteAlpha = tp < 0.35 ? 0.2 * (1.0 - easeOut(tp / 0.35)) : 0.0; // finish the remaining white on the pop
+			glowAlpha = tp < 0.60 ? 0.55 * (1.0 - tp / 0.60) : 0.0;
+			glowRadius = 40.0;
+			shakeX = 0.0;
+		}
+		if (!evolveWhite)
+		{
+			whiteAlpha = 0.0; // colored-only animation (opt-in / clan already set it up): no white phase
+		}
+
+		java.awt.Composite orig = g.getComposite();
+		Object origInterp = g.getRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION);
+		double dcx = cx + shakeX;
+
+		// The glow tracks the symbol: pure white early, blending toward the alliance color as the white fades,
+		// so the glow finishes colored like the symbol (a colored-only opt-in evolve glows in color throughout).
+		float colorIn = (float) (1.0 - Math.max(0.0, Math.min(1.0, whiteAlpha)));
+		Color glowCol = new Color(
+				clamp255(Math.round(255 + (allianceColor.getRed() - 255) * colorIn)),
+				clamp255(Math.round(255 + (allianceColor.getGreen() - 255) * colorIn)),
+				clamp255(Math.round(255 + (allianceColor.getBlue() - 255) * colorIn)));
+		drawGlow(g, dcx, cy, glowRadius, glowAlpha, baseAlpha, glowCol);
+
+		int iw = colored.getWidth();
+		int ih = colored.getHeight();
+		java.awt.geom.AffineTransform at = new java.awt.geom.AffineTransform();
+		at.translate(dcx, cy);
+		at.scale(scale, scale);
+		at.translate(-iw / 2.0, -ih / 2.0);
+		g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+				java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR); // keep the pixel art crisp when scaled
+		BufferedImage white = whiteSilhouette(colored);
+		// Draw the colored symbol, then the white silhouette on top at the current whiteAlpha - so it reads pure
+		// white early and tints toward the alliance color as the white fades across the shake and pop.
+		g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, baseAlpha));
+		g.drawImage(colored, at, null);
+		if (whiteAlpha > 0.001)
+		{
+			g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER,
+					(float) Math.min(1.0, whiteAlpha) * baseAlpha));
+			g.drawImage(white, at, null);
+		}
+
+		g.setComposite(orig);
+		if (origInterp != null)
+		{
+			g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, origInterp);
+		}
+	}
+
+	/** A soft radial glow (in {@code glowColor}) filled as a circle. {@code alpha} is the effective center alpha. */
+	private void drawGlow(Graphics2D g, double cx, double cy, double radius, double alpha, float baseAlpha,
+			Color glowColor)
+	{
+		if (alpha <= 0.001 || radius < 1.0)
+		{
+			return;
+		}
+		float ga = (float) Math.max(0.0, Math.min(1.0, (alpha / 0.55) * baseAlpha));
+		float r = (float) radius;
+		Color center = new Color(glowColor.getRed(), glowColor.getGreen(), glowColor.getBlue(), 140);
+		Color edge = new Color(glowColor.getRed(), glowColor.getGreen(), glowColor.getBlue(), 0);
+		java.awt.RadialGradientPaint glow = new java.awt.RadialGradientPaint(
+				new java.awt.geom.Point2D.Double(cx, cy), r,
+				new float[]{0f, 1f},
+				new Color[]{center, edge});
+		java.awt.Composite oc = g.getComposite();
+		java.awt.Paint op = g.getPaint();
+		g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, ga));
+		g.setPaint(glow);
+		g.fill(new java.awt.geom.Ellipse2D.Double(cx - r, cy - r, r * 2, r * 2));
+		g.setPaint(op);
+		g.setComposite(oc);
+	}
+
+	/** A pure-white version of a symbol (keeps its alpha shape), built once and cached next to the colored one. */
+	private BufferedImage whiteSilhouette(BufferedImage src)
+	{
+		BufferedImage cached = whiteCache.get(src);
+		if (cached != null)
+		{
+			return cached;
+		}
+		BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = out.createGraphics();
+		g.drawImage(src, 0, 0, null);
+		g.setComposite(AlphaComposite.SrcIn);
+		g.setColor(Color.WHITE);
+		g.fillRect(0, 0, src.getWidth(), src.getHeight());
+		g.dispose();
+		whiteCache.put(src, out);
+		return out;
+	}
+
+	private static int clamp255(int v)
+	{
+		return v < 0 ? 0 : Math.min(v, 255);
+	}
+
+	private static double easeOut(double t)
+	{
+		return 1.0 - Math.pow(1.0 - t, 3);
+	}
+
+	private static double backOut(double t)
+	{
+		double c1 = 1.9;
+		double c3 = c1 + 1.0;
+		return 1.0 + c3 * Math.pow(t - 1.0, 3) + c1 * Math.pow(t - 1.0, 2);
 	}
 
 	/**
 	 * A brightened copy of the symbol for the capture pulse: a lighter shade of the symbol's OWN color washed
 	 * over it (not white), scaled by the pulse so it brightens up then settles back to normal.
 	 */
-	private static BufferedImage flashed(BufferedImage src, Color color, float amount)
+	private static BufferedImage flashed(BufferedImage src, float amount)
 	{
-		Color bright = new Color(
-				Math.min(255, color.getRed() + 90),
-				Math.min(255, color.getGreen() + 90),
-				Math.min(255, color.getBlue() + 90));
-		float a = Math.max(0f, Math.min(0.45f, amount * 0.45f));
-		BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = out.createGraphics();
-		g.drawImage(src, 0, 0, null);
-		g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, a));
-		g.setColor(bright);
-		g.fillRect(0, 0, src.getWidth(), src.getHeight());
-		g.dispose();
+		float amt = Math.max(0f, Math.min(1f, amount));
+		if (amt <= 0f)
+		{
+			return src;
+		}
+		float scale = 1.0f + amt * 0.9f; // up to ~1.9x brighter at the peak
+		int w = src.getWidth();
+		int h = src.getHeight();
+		BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+		for (int y = 0; y < h; y++)
+		{
+			for (int x = 0; x < w; x++)
+			{
+				int p = src.getRGB(x, y);
+				int a = p >>> 24;
+				int r = (p >> 16) & 0xff;
+				int gg = (p >> 8) & 0xff;
+				int b = p & 0xff;
+				// Keep transparent pixels and the black outline untouched; brighten the colored interior by SCALING
+				// each channel (multiplicative), which keeps the hue - a red symbol flares to a brighter red, not
+				// toward white - while the shadow/base/highlight shading stays proportional.
+				if (a == 0 || (int) Math.round(0.299 * r + 0.587 * gg + 0.114 * b) < 40)
+				{
+					out.setRGB(x, y, p);
+					continue;
+				}
+				r = Math.min(255, Math.round(r * scale));
+				gg = Math.min(255, Math.round(gg * scale));
+				b = Math.min(255, Math.round(b * scale));
+				out.setRGB(x, y, (a << 24) | (r << 16) | (gg << 8) | b);
+			}
+		}
 		return out;
 	}
 

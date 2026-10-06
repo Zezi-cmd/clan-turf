@@ -24,13 +24,11 @@
  */
 package com.zezizaza.clanturf;
 
-import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import net.runelite.client.util.ImageUtil;
 
 /**
  * Maps a clan name to a stable color. Deterministic, so two players who have never
@@ -95,27 +93,125 @@ final class ClanTurfColors
 		return adjust(baseColor(clanName));
 	}
 
-	/** Color-wash strength for symbols; lower shows more of the symbol's own detail, higher reads more solid. */
-	static final float SYMBOL_TINT_ALPHA = 0.55f;
-
 	/**
-	 * A clan-motif symbol washed in a color: the symbol's own detail shows through a translucent color layer
-	 * (SRC_ATOP paints only where the symbol has pixels). Shared by the overhead tag, scoreboard bars and
-	 * world map so a symbol reads in its alliance's color everywhere. Callers should cache the result.
+	 * Alliance-symbol recolor (v9): a per-pixel palette swap, not a flat wash. The symbol's black outline is kept
+	 * as-is; its grey interior is remapped onto a shadow -&gt; base -&gt; highlight ramp built from {@code base}
+	 * (the alliance color), so each symbol wears its color with real shading and highlights instead of a solid
+	 * overlay. Callers must cache the result by (icon id, color); this is a per-pixel pass, never run per frame.
 	 */
-	static BufferedImage tintSymbol(BufferedImage raw, Color color, int size, float alpha)
+	private static final java.util.Map<String, BufferedImage> RECOLOR_CACHE = new java.util.HashMap<>();
+
+	static BufferedImage recolorSymbol(BufferedImage raw, Color base, int size)
 	{
-		BufferedImage base = size > 0 ? ImageUtil.resizeImage(raw, size, size) : raw;
-		int w = base.getWidth();
-		int h = base.getHeight();
+		if (raw == null)
+		{
+			return null;
+		}
+		// Cache by the (stable) raw-sprite instance, color and size, so this per-pixel pass never runs per frame
+		// even for the scoreboard bars that call it from paint. Callers resolve raw from an id-keyed sprite cache.
+		String ck = System.identityHashCode(raw) + ":" + (base == null ? 0 : base.getRGB()) + ":" + size;
+		BufferedImage hit = RECOLOR_CACHE.get(ck);
+		if (hit != null)
+		{
+			return hit;
+		}
+		// Resize with NEAREST-NEIGHBOR (not smooth/bilinear): smooth scaling blends the black outline into the
+		// colored interior and the transparent edges, creating intermediate pixels that recolor into a fringe.
+		// Nearest-neighbor keeps every pixel a clean copy, so outline vs interior stays crisp.
+		BufferedImage src;
+		if (size > 0 && (raw.getWidth() != size || raw.getHeight() != size))
+		{
+			src = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+			Graphics2D rg = src.createGraphics();
+			rg.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+					java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+			rg.drawImage(raw, 0, 0, size, size, null);
+			rg.dispose();
+		}
+		else
+		{
+			src = raw;
+		}
+		int w = src.getWidth();
+		int h = src.getHeight();
+
+		// Clamp brightness so a near-black color doesn't merge with the outline and a near-white one keeps a
+		// visible highlight range.
+		base = clampBrightness(base, 0.25f, 0.90f);
+		Color shadow = scaleBrightness(base, 0.70f);
+		Color hi = mix(base, Color.WHITE, 0.50f);
+
+		// Pass 1: find the grey range of the non-outline pixels so we can normalize it to 0..1.
+		int lo = 255;
+		int hiL = 0;
+		for (int y = 0; y < h; y++)
+		{
+			for (int x = 0; x < w; x++)
+			{
+				int p = src.getRGB(x, y);
+				if ((p >>> 24) == 0)
+				{
+					continue;
+				}
+				int l = lum(p);
+				if (l < 40)
+				{
+					continue; // outline - excluded from the range
+				}
+				lo = Math.min(lo, l);
+				hiL = Math.max(hiL, l);
+			}
+		}
+
+		// Pass 2: keep transparent + outline pixels; map every other pixel onto the ramp by its grey level.
 		BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = out.createGraphics();
-		g.drawImage(base, 0, 0, null);
-		g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, alpha));
-		g.setColor(color);
-		g.fillRect(0, 0, w, h);
-		g.dispose();
+		for (int y = 0; y < h; y++)
+		{
+			for (int x = 0; x < w; x++)
+			{
+				int p = src.getRGB(x, y);
+				int a = p >>> 24;
+				if (a == 0 || lum(p) < 40)
+				{
+					out.setRGB(x, y, p);
+					continue;
+				}
+				float t = hiL == lo ? 0.5f : (lum(p) - lo) / (float) (hiL - lo);
+				Color c = t < 0.5f ? mix(shadow, base, t * 2f) : mix(base, hi, (t - 0.5f) * 2f);
+				out.setRGB(x, y, (a << 24) | (c.getRGB() & 0xFFFFFF));
+			}
+		}
+		RECOLOR_CACHE.put(ck, out);
 		return out;
+	}
+
+	private static int lum(int argb)
+	{
+		int r = (argb >> 16) & 0xff;
+		int g = (argb >> 8) & 0xff;
+		int b = argb & 0xff;
+		return (int) Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+	}
+
+	private static Color mix(Color a, Color b, float t)
+	{
+		t = Math.max(0f, Math.min(1f, t));
+		int r = Math.round(a.getRed() + (b.getRed() - a.getRed()) * t);
+		int g = Math.round(a.getGreen() + (b.getGreen() - a.getGreen()) * t);
+		int bl = Math.round(a.getBlue() + (b.getBlue() - a.getBlue()) * t);
+		return new Color(r, g, bl);
+	}
+
+	private static Color scaleBrightness(Color c, float f)
+	{
+		float[] hsb = Color.RGBtoHSB(c.getRed(), c.getGreen(), c.getBlue(), null);
+		return Color.getHSBColor(hsb[0], hsb[1], Math.max(0f, Math.min(1f, hsb[2] * f)));
+	}
+
+	private static Color clampBrightness(Color c, float min, float max)
+	{
+		float[] hsb = Color.RGBtoHSB(c.getRed(), c.getGreen(), c.getBlue(), null);
+		return Color.getHSBColor(hsb[0], hsb[1], Math.max(min, Math.min(max, hsb[2])));
 	}
 
 	/** The clan's color before any color-blindness adjustment: a local override, else a stable hash. */
