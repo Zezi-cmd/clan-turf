@@ -1794,6 +1794,12 @@ class ClanTurfPanel extends PluginPanel
 		JPanel bar = tabGroup(true, sortLabel("World", BattleSort.WORLD),
 				sortLabel("Owner", BattleSort.OWNER), sortLabel("Tiles", BattleSort.TILES));
 		bar.setBorder(BorderFactory.createEmptyBorder(6, 7, 6, 7)); // inset + vertical gap so it reads as a control strip
+		// Lock the strip height AFTER the border is added: tabGroup only capped height to TAB_H (border-less), so
+		// the 6+6 border made max < preferred and BoxLayout smashed the buttons when the list was short / post-reset.
+		// Pin min = max = the real preferred height so it renders identically regardless of row count or scrollbar.
+		int barH = bar.getPreferredSize().height;
+		bar.setMinimumSize(new Dimension(0, barH));
+		bar.setMaximumSize(new Dimension(Integer.MAX_VALUE, barH));
 		return bar;
 	}
 
