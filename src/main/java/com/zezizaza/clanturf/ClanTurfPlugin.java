@@ -426,6 +426,7 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Throttles panel rebuilds while polling the server every tick. */
 	private int panelTicks;
+	private boolean panelDirty; // a local claim happened this tick: push the panel now instead of waiting for the throttle
 	private static final int PANEL_UPDATE_TICKS = 3;
 
 	/** Tiles beyond the GE within which the client still syncs (so turf shows as you approach). */
@@ -1053,12 +1054,7 @@ public class ClanTurfPlugin extends Plugin
 			if (++panelTicks >= PANEL_UPDATE_TICKS)
 			{
 				panelTicks = 0;
-				panel.update(aggregatedClaims(), world, GrandExchangeArea.totalTiles(), committedLeader,
-						displayClan(effectiveClanName()), findBattle(world), store.connectionStatus(),
-						clanHintDue(), perClanTileCounts());
-				panel.updateBattles(battlesForPanel(), displayClan(effectiveClanName()), client.getWorld());
-				panel.setGlobalClaims(store.getGlobalClaims());
-				pushLeaderboardToPanel();
+				pushPanel();
 			}
 		}
 
@@ -1100,6 +1096,29 @@ public class ClanTurfPlugin extends Plugin
 			}
 		}
 		lastEraseTile = modelTile; // tracked every tick, so Surrender starts fresh from where you stand
+
+		// A tile you just claimed is LOCAL info - don't make yourself wait up to PANEL_UPDATE_TICKS for the
+		// scoreboard stake bar and your current-world battle row to catch up. tryClaim runs after the throttled
+		// push above, so push again now when it reported a gain, same tick as the leaderboard counter updates.
+		if (store == serverStore && panelDirty)
+		{
+			panelDirty = false;
+			panelTicks = 0;
+			pushPanel();
+		}
+	}
+
+	/** Push the current local state to the side panel: scoreboard, Active battles, community total, leaderboard.
+	 *  Called on the throttled tick and immediately after a local claim so your own actions show without delay. */
+	private void pushPanel()
+	{
+		int world = client.getWorld();
+		panel.update(aggregatedClaims(), world, GrandExchangeArea.totalTiles(), committedLeader,
+				displayClan(effectiveClanName()), findBattle(world), store.connectionStatus(),
+				clanHintDue(), perClanTileCounts());
+		panel.updateBattles(battlesForPanel(), displayClan(effectiveClanName()), world);
+		panel.setGlobalClaims(store.getGlobalClaims());
+		pushLeaderboardToPanel();
 	}
 
 	@Subscribe
@@ -1290,6 +1309,7 @@ public class ClanTurfPlugin extends Plugin
 		if (gain && panel != null)
 		{
 			panel.addLocalClaim(); // tick the community counter for a genuine new/stolen tile only
+			panelDirty = true;     // local claim: refresh the scoreboard + current-world battle this tick
 		}
 		log.debug("Claimed {},{} plane {} for {} on world {}",
 				wp.getRegionX(), wp.getRegionY(), wp.getPlane(), clanName, world);
@@ -1370,6 +1390,7 @@ public class ClanTurfPlugin extends Plugin
 		lbDaily++;
 		lbWeekly++;
 		persistLeaderboardCounters();
+		panel.bumpMineTiles(lbDaily, lbWeekly); // grow "Your tiles" live, no full board rebuild
 		sendClaimIncrementIfOptedIn();
 	}
 

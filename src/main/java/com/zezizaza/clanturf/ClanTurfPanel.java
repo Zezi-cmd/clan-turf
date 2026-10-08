@@ -292,6 +292,28 @@ class ClanTurfPanel extends PluginPanel
 	private Color mineWeeklyCur = Color.WHITE, mineWeeklyTarget = Color.WHITE, mineWeeklyFrom = Color.WHITE;
 	private Timer mineColorTimer;
 	private long mineColorStartMs;
+	// Count-up for SERVER-sourced leaderboard numbers (OTHER players' rows): the shown value eases UP toward its
+	// target when the server reports more tiles, like the Community Claims counter, instead of popping. My own
+	// counter and my own row are LOCAL - they snap instantly on each claim, never eased (that's the whole point:
+	// I should see tiles I just walked on without waiting for the server). Rows snap DOWN on a reset.
+	private final java.util.Map<String, Long> lbRowShown = new java.util.HashMap<>();   // name -> displayed count
+	private final java.util.Map<String, Long> lbRowTarget = new java.util.HashMap<>();  // name -> target count
+	private final java.util.Map<String, JLabel> lbRowLabel = new java.util.HashMap<>(); // name -> on-screen count label
+	private Timer lbAnimTimer;
+	// Same server-sourced count-up for the Active Battles tile counts (owner over runner-up): the numbers roll in
+	// when the /battles poll reports changes, instead of popping. Keyed by world; shared timer with the board above.
+	private final java.util.Map<Integer, long[]> battleShown = new java.util.HashMap<>();   // world -> [owner,runner,total]
+	private final java.util.Map<Integer, long[]> battleTarget = new java.util.HashMap<>(); // world -> [owner,runner,total]
+	private final java.util.Map<Integer, JLabel> battleTileLabel = new java.util.HashMap<>();
+	private final java.util.Map<Integer, Boolean> battleContested = new java.util.HashMap<>();
+	private final java.util.Map<Integer, VerticalBattleBorder> battleBorder = new java.util.HashMap<>();
+	private final java.util.Map<Integer, JComponent> battleRowComp = new java.util.HashMap<>(); // row to repaint on roll
+	// Last-rendered view (period/scope/page). A change means the rows show DIFFERENT numbers (Daily<->Weekly most of
+	// all), so the count-up must snap to the new view instead of animating from the old view's values.
+	private LbSort lastRenderSort;
+	private LbScope lastRenderScope;
+	private int lastRenderPage = -1;
+	private int battleCurrentWorld = -1; // the world I'm on: its counts are my local claims, so they snap (instant)
 	private int lbDaily;
 	private int lbWeekly;
 	private boolean lbOptedIn;
@@ -1605,6 +1627,12 @@ class ClanTurfPanel extends PluginPanel
 			lastBattles = list;
 			lastBattlesMyClan = myClan;
 			lastBattlesWorld = currentWorld;
+			// Retarget the per-world tile counts and kick the count-up BEFORE the rebuild guard, so a poll that only
+			// changes counts (no reorder) rolls the numbers in place instead of rebuilding the rows. My current
+			// world's counts are local claims, so retargetBattles snaps them instantly (never eased).
+			battleCurrentWorld = currentWorld;
+			retargetBattles(list);
+			startLbAnim();
 			String sig = battlesSignature(list, myClan, currentWorld);
 			if (!revealBattlesPending && sig.equals(lastBattlesSig))
 			{
@@ -1612,6 +1640,10 @@ class ClanTurfPanel extends PluginPanel
 			}
 			lastBattlesSig = sig;
 			battlesBox.removeAll();
+			battleTileLabel.clear();  // all re-registered per world in battleRow during this rebuild
+			battleContested.clear();
+			battleBorder.clear();
+			battleRowComp.clear();
 			if (list.isEmpty())
 			{
 				JLabel none = new JLabel("None right now.");
@@ -1719,13 +1751,14 @@ class ClanTurfPanel extends PluginPanel
 	 */
 	private static String battlesSignature(List<ClanTurfBattle> list, String myClan, int currentWorld)
 	{
+		// Structure-only: world order + owner/runner names + colors. The tile COUNTS are left out on purpose - a
+		// count change rolls in via tickLbAnim, and only reorders (which change the world sequence here) rebuild.
 		StringBuilder sb = new StringBuilder();
 		sb.append(currentWorld).append('|').append(myClan == null ? "" : myClan).append('#');
 		for (ClanTurfBattle b : list)
 		{
 			sb.append(b.getWorld()).append(',').append(b.getOwner()).append(',')
-					.append(b.getOwnerTiles()).append(',').append(b.getTotalTiles()).append(',')
-					.append(b.getRunnerUp()).append(',').append(b.getRunnerUpTiles()).append(',')
+					.append(b.getRunnerUp()).append(',')
 					// Include the clans' current colors so a recolor rebuilds the rows too.
 					.append(ClanTurfColors.forClan(b.getOwner()).getRGB()).append(',')
 					.append(ClanTurfColors.forClan(b.getRunnerUp()).getRGB()).append(';');
@@ -1853,14 +1886,22 @@ class ClanTurfPanel extends PluginPanel
 
 		private final Color leader;
 		private final Color challenger; // null = solo-held world (single bar)
-		private final int leaderTiles;
-		private final int challengerTiles;
-		private final int totalTiles; // denominator: each bar height is that clan's share of the WHOLE GE
+		private int leaderTiles;        // mutable so the count-up can roll the bar heights with the numbers
+		private int challengerTiles;
+		private int totalTiles; // denominator: each bar height is that clan's share of the WHOLE GE
 
 		VerticalBattleBorder(Color leader, Color challenger, int leaderTiles, int challengerTiles, int totalTiles)
 		{
 			this.leader = leader;
 			this.challenger = challenger;
+			this.leaderTiles = leaderTiles;
+			this.challengerTiles = challengerTiles;
+			this.totalTiles = totalTiles;
+		}
+
+		/** Update the bar heights to the animator's current shown values; caller repaints the row. */
+		void setTiles(int leaderTiles, int challengerTiles, int totalTiles)
+		{
 			this.leaderTiles = leaderTiles;
 			this.challengerTiles = challengerTiles;
 			this.totalTiles = totalTiles;
@@ -1928,10 +1969,15 @@ class ClanTurfPanel extends PluginPanel
 		// challenger) for a contested one.
 		Color ownerColor = ClanTurfColors.forClan(b.getOwner());
 		Color runnerColor = b.getRunnerUp() != null ? ClanTurfColors.forClan(b.getRunnerUp()) : null;
-		row.setBorder(BorderFactory.createCompoundBorder(
-				new VerticalBattleBorder(ownerColor, runnerColor, b.getOwnerTiles(), b.getRunnerUpTiles(),
-						b.getTotalTiles()),
-				BorderFactory.createEmptyBorder(5, 6, 5, 8)));
+		// Seed the bar from the animator's shown value (eases for server worlds, snaps for my own), and register it
+		// + the row so the count-up rolls the bar heights in step with the numbers.
+		long[] shownBar = battleShown.getOrDefault(b.getWorld(),
+				new long[]{b.getOwnerTiles(), b.getRunnerUpTiles(), b.getTotalTiles()});
+		VerticalBattleBorder vbb = new VerticalBattleBorder(ownerColor, runnerColor,
+				(int) shownBar[0], (int) shownBar[1], (int) shownBar[2]);
+		row.setBorder(BorderFactory.createCompoundBorder(vbb, BorderFactory.createEmptyBorder(5, 6, 5, 8)));
+		battleBorder.put(b.getWorld(), vbb);
+		battleRowComp.put(b.getWorld(), row);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, BATTLE_CARD_H));
 
@@ -1987,7 +2033,6 @@ class ClanTurfPanel extends PluginPanel
 		String ownerName = "<nobr><span style='color:#" + ownerHex + "'>"
 				+ escape(clip(b.getOwner(), BATTLE_NAME_CLIP)) + "</span></nobr>";
 		String ownerHtml;
-		String tilesHtml;
 		if (b.getRunnerUp() != null)
 		{
 			String upHex = hex(ClanTurfColors.forClan(b.getRunnerUp()));
@@ -1996,8 +2041,6 @@ class ClanTurfPanel extends PluginPanel
 			ownerHtml = "<html><table cellpadding=0 cellspacing=0>"
 					+ "<tr><td>" + ownerName + "</td></tr>"
 					+ "<tr><td>" + upName + "</td></tr></table></html>";
-			tilesHtml = "<html><div align='right'>" + b.getOwnerTiles() + "<br>"
-					+ b.getRunnerUpTiles() + "</div></html>";
 		}
 		else
 		{
@@ -2012,19 +2055,25 @@ class ClanTurfPanel extends PluginPanel
 						+ escape(soloName.substring(sp + 1).trim()) + "</span></nobr>";
 			}
 			ownerHtml = "<html>" + ownerBody + "</html>";
-			tilesHtml = "<html>" + b.getOwnerTiles() + "</html>";
 		}
 		JLabel owner = new JLabel(ownerHtml);
 		owner.setFont(FontManager.getRunescapeFont());
 		owner.setForeground(Color.WHITE);
 		row.add(owner, BorderLayout.CENTER);
 
-		JLabel tiles = new JLabel(tilesHtml);
+		// Tile counts seeded from the animator's shown value (eases up toward the server total via tickLbAnim), and
+		// the label registered by world so the roll-in updates it in place without a rebuild.
+		boolean contested = b.getRunnerUp() != null;
+		long[] shownTiles = battleShown.getOrDefault(b.getWorld(),
+				new long[]{b.getOwnerTiles(), b.getRunnerUpTiles()});
+		JLabel tiles = new JLabel(battleTilesHtml(shownTiles[0], shownTiles[1], contested));
 		tiles.setFont(FontManager.getRunescapeFont());
 		tiles.setForeground(Color.WHITE);
 		tiles.setHorizontalAlignment(JLabel.RIGHT);
 		fixWidth(tiles, BATTLE_TILES_COL_W);
 		row.add(tiles, BorderLayout.EAST);
+		battleTileLabel.put(b.getWorld(), tiles);
+		battleContested.put(b.getWorld(), contested);
 		return row;
 	}
 
@@ -2247,6 +2296,27 @@ class ClanTurfPanel extends PluginPanel
 	{
 		// The active board depends on the scope tab: ALL = every opted-in player server-wide, CLAN = just yours.
 		java.util.List<ClanTurfStore.LeaderboardEntry> activeBoard = lbScope == LbScope.ALL ? lbBoardAll : lbBoard;
+		// Optimistic: show MY live local count on my own row so I climb the instant I claim a tile, instead of
+		// waiting for the server poll to echo back tiles I collected myself. Override only my row with the max of
+		// its server value and my local count; everyone else stays server-authoritative.
+		if (lbMyName != null && !lbMyName.isEmpty() && (lbDaily > 0 || lbWeekly > 0))
+		{
+			java.util.List<ClanTurfStore.LeaderboardEntry> opt = new ArrayList<>(activeBoard.size());
+			for (ClanTurfStore.LeaderboardEntry e : activeBoard)
+			{
+				if (e.name != null && e.name.equalsIgnoreCase(lbMyName)
+						&& (lbDaily > e.daily || lbWeekly > e.weekly))
+				{
+					opt.add(new ClanTurfStore.LeaderboardEntry(e.name,
+							Math.max(e.daily, lbDaily), Math.max(e.weekly, lbWeekly)));
+				}
+				else
+				{
+					opt.add(e);
+				}
+			}
+			activeBoard = opt;
+		}
 		// Deterministic order (active period desc, then name) so an identical board from a differently-ordered
 		// poll produces the same signature and we skip the rebuild - otherwise the section flickers each poll.
 		java.util.List<ClanTurfStore.LeaderboardEntry> sorted = new ArrayList<>(activeBoard);
@@ -2265,6 +2335,22 @@ class ClanTurfPanel extends PluginPanel
 				visible.add(e);
 			}
 		}
+
+		// A view change (Daily<->Weekly, All<->Clan, or a page flip) shows different numbers per row, so snap the
+		// count-up to the new view instead of animating from the old view's values - drop the shown values so
+		// retargetRows re-seeds each row at its current number.
+		if (lbSort != lastRenderSort || lbScope != lastRenderScope || lbPage != lastRenderPage)
+		{
+			lbRowShown.clear();
+			lastRenderSort = lbSort;
+			lastRenderScope = lbScope;
+			lastRenderPage = lbPage;
+		}
+		// Point each row's count at its latest value and kick the count-up BEFORE the rebuild guard below, so a
+		// pure value change (a server poll with no reorder) still rolls the numbers up without rebuilding the rows.
+		retargetRows(visible);
+		startLbAnim();
+		applyMineLabel(); // keep the instant local counter current even when the rows below don't rebuild
 
 		// Clamp the page in case the board shrank (opt-outs, period reset) or the scope/sort just changed.
 		int pageCount = Math.max(1, (visible.size() + LB_PAGE_SIZE - 1) / LB_PAGE_SIZE);
@@ -2287,9 +2373,11 @@ class ClanTurfPanel extends PluginPanel
 		Color myWeeklyMedal = myPodiumColor(true);
 
 		StringBuilder sig = new StringBuilder();
+		// Structure-only signature: rebuild the rows when the ORDER / roster / page / scope / medals change, but
+		// NOT when a count merely ticks - those animate in place via tickLbAnim (otherwise a rebuild would snap them).
 		sig.append(lbShow).append('|').append(leaderboardCollapsed).append('|').append(lbSort)
 				.append('|').append(lbScope).append('|').append(lbPage)
-				.append('|').append(lbDaily).append('|').append(lbWeekly).append('|').append(lbOptedIn)
+				.append('|').append(lbOptedIn)
 				.append('|').append(lbReady).append('|').append(lbMyName).append('|').append(lbClanName)
 				.append('|').append(lbDayWinner).append('|').append(lbWeekWinner)
 				.append('|').append(lbDayWinnerAll).append('|').append(lbWeekWinnerAll)
@@ -2301,8 +2389,8 @@ class ClanTurfPanel extends PluginPanel
 				.append('|').append(ClanTurfColors.colorblind(MEDAL_FIRST).getRGB());
 		for (ClanTurfStore.LeaderboardEntry e : sorted)
 		{
-			sig.append('#').append(e.name).append(':').append(e.daily).append(':').append(e.weekly)
-					.append(lbRankIcons.containsKey(e.name) ? 'I' : '-');
+			// Name + icon only, no value: order changes rebuild (the name sequence shifts), value ticks animate.
+			sig.append('#').append(e.name).append(lbRankIcons.containsKey(e.name) ? 'I' : '-');
 		}
 		String s = sig.toString();
 		if (s.equals(lastLbSig))
@@ -2472,6 +2560,7 @@ class ClanTurfPanel extends PluginPanel
 		int to = Math.min(from + LB_PAGE_SIZE, visible.size());
 		boolean cascade = !lbCascadedOnce; // rows fade in top-down only on the first load this session
 		long cascadeBase = System.currentTimeMillis();
+		lbRowLabel.clear(); // re-registered below for the rows on this page, so the animator drives the live labels
 		for (int i = from; i < to; i++)
 		{
 			ClanTurfStore.LeaderboardEntry e = visible.get(i);
@@ -2523,7 +2612,10 @@ class ClanTurfPanel extends PluginPanel
 
 			// Fixed-width, right-aligned count slot: a number changing digit count (9 -> 2211) must not
 			// resize the row, or the whole panel's width oscillates and the text jumps around.
-			JLabel count = new JLabel(String.valueOf(v), JLabel.RIGHT);
+			// Seed from the animator's shown value (which eases up toward v for server rows, snaps for my own)
+			// and register the label so tickLbAnim can roll the number in place without a rebuild.
+			long shownV = lbRowShown.getOrDefault(e.name, v);
+			JLabel count = new JLabel(String.valueOf(shownV), JLabel.RIGHT);
 			count.setFont(font);
 			count.setForeground(fg); // top 3 in their rank color, everyone else white (fg is white when not top 3)
 			Dimension cd = new Dimension(54, count.getPreferredSize().height);
@@ -2531,6 +2623,10 @@ class ClanTurfPanel extends PluginPanel
 			count.setMinimumSize(cd);
 			count.setMaximumSize(cd);
 			row.add(count, BorderLayout.EAST);
+			if (e.name != null)
+			{
+				lbRowLabel.put(e.name, count);
+			}
 
 			row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 			if (cascade)
@@ -2614,12 +2710,205 @@ class ClanTurfPanel extends PluginPanel
 		String optedOutNote = lbOptedIn
 				? ""
 				: "<br><span style='color:#" + hex(TEXT_MUTED) + "'>not on the board, still counted for you</span>";
+		// Local counts snap instantly (bumped on every claim) - no roll-in; I earned these tiles myself.
 		mineLabel.setText("<html><body style='width:170px'>Your tiles<br>"
 				+ "<span style='color:#" + gray + "'>Today: </span>"
 				+ "<b style='color:#" + hex(mineDailyCur) + "'>" + lbDaily + "</b><br>"
 				+ "<span style='color:#" + gray + "'>This week: </span>"
 				+ "<b style='color:#" + hex(mineWeeklyCur) + "'>" + lbWeekly + "</b>"
 				+ optedOutNote + "</body></html>");
+	}
+
+	/**
+	 * Point every visible row's count-up at its latest value. OTHER players' rows ease up toward their new server
+	 * total (rolling in like Community Claims); MY OWN row snaps to my live local count (I earned it, no wait). A
+	 * row's first appearance snaps, and any drop (reset) snaps down. Names off the board are dropped so the maps
+	 * don't grow without bound.
+	 */
+	private void retargetRows(java.util.List<ClanTurfStore.LeaderboardEntry> visible)
+	{
+		java.util.Set<String> keep = new java.util.HashSet<>();
+		for (ClanTurfStore.LeaderboardEntry e : visible)
+		{
+			if (e.name == null)
+			{
+				continue;
+			}
+			keep.add(e.name);
+			long target = lbSort == LbSort.WEEKLY ? e.weekly : e.daily;
+			lbRowTarget.put(e.name, target);
+			boolean mine = lbMyName != null && e.name.equalsIgnoreCase(lbMyName);
+			Long shown = lbRowShown.get(e.name);
+			if (mine || shown == null || target < shown)
+			{
+				lbRowShown.put(e.name, target); // my own row, a first appearance, or a reset: snap
+				// If the row is already on screen and we're NOT about to rebuild, snap its label now (the animator
+				// skips rows already at target, so my instant local count would otherwise wait for a rebuild).
+				JLabel lbl = lbRowLabel.get(e.name);
+				if (lbl != null)
+				{
+					lbl.setText(String.valueOf(target));
+				}
+			}
+		}
+		lbRowShown.keySet().retainAll(keep);
+		lbRowTarget.keySet().retainAll(keep);
+	}
+
+	/** The Active-battles tile-count cell: owner over runner-up (contested) or just the owner (solo). Shared by the
+	 *  row build and the count-up tick so the rolled-in numbers render identically. */
+	private static String battleTilesHtml(long owner, long runner, boolean contested)
+	{
+		return contested
+				? "<html><div align='right'>" + owner + "<br>" + runner + "</div></html>"
+				: "<html>" + owner + "</html>";
+	}
+
+	/** Point each world's battle counts at the latest /battles values. First sighting snaps; a drop snaps down; a
+	 *  rise eases up via {@link #tickLbAnim}. Worlds no longer listed are dropped so the maps don't grow. */
+	private void retargetBattles(List<ClanTurfBattle> list)
+	{
+		java.util.Set<Integer> keep = new java.util.HashSet<>();
+		for (ClanTurfBattle b : list)
+		{
+			int w = b.getWorld();
+			keep.add(w);
+			long owner = b.getOwnerTiles();
+			long runner = b.getRunnerUpTiles();
+			long total = b.getTotalTiles();
+			battleTarget.put(w, new long[]{owner, runner, total});
+			long[] shown = battleShown.get(w);
+			boolean mine = w == battleCurrentWorld; // the world I'm on = my local claims: snap instantly, never eased
+			if (mine || shown == null || owner < shown[0] || runner < shown[1] || total < shown[2])
+			{
+				battleShown.put(w, new long[]{owner, runner, total}); // my world, first sighting, or a drop: snap
+				snapBattleRow(w, owner, runner, total); // push the snap to the on-screen label + bar if it exists
+			}
+		}
+		battleShown.keySet().retainAll(keep);
+		battleTarget.keySet().retainAll(keep);
+	}
+
+	/** Push shown values straight onto a world's on-screen count label and bar (used when snapping - my own world,
+	 *  a first sighting, or a reset - so it updates even if the rows don't rebuild). */
+	private void snapBattleRow(int w, long owner, long runner, long total)
+	{
+		JLabel lbl = battleTileLabel.get(w);
+		if (lbl != null)
+		{
+			lbl.setText(battleTilesHtml(owner, runner, Boolean.TRUE.equals(battleContested.get(w))));
+		}
+		VerticalBattleBorder bd = battleBorder.get(w);
+		if (bd != null)
+		{
+			bd.setTiles((int) owner, (int) runner, (int) total);
+			JComponent rc = battleRowComp.get(w);
+			if (rc != null)
+			{
+				rc.repaint();
+			}
+		}
+	}
+
+	/** One ease step toward {@code target}: snap instantly on a drop (reset), otherwise move ~18% of the gap with a
+	 *  floor of 1 so it always lands - the same feel as the Community Claims counter. */
+	private static long easeStep(long shown, long target)
+	{
+		if (target <= shown)
+		{
+			return target;
+		}
+		long next = shown + Math.max(1, Math.round((target - shown) * 0.18));
+		return next > target ? target : next;
+	}
+
+	/** Start (or keep running) the shared count-up timer that eases the "Your tiles" counter and every on-screen
+	 *  leaderboard row toward their targets. */
+	private void startLbAnim()
+	{
+		if (lbAnimTimer == null)
+		{
+			lbAnimTimer = new Timer(25, e -> tickLbAnim());
+		}
+		if (!lbAnimTimer.isRunning())
+		{
+			lbAnimTimer.start();
+		}
+	}
+
+	private void tickLbAnim()
+	{
+		boolean active = false;
+		for (java.util.Map.Entry<String, JLabel> en : lbRowLabel.entrySet())
+		{
+			JLabel lbl = en.getValue();
+			long shown = lbRowShown.getOrDefault(en.getKey(), 0L);
+			long target = lbRowTarget.getOrDefault(en.getKey(), shown);
+			if (shown == target)
+			{
+				continue;
+			}
+			shown = easeStep(shown, target);
+			lbRowShown.put(en.getKey(), shown);
+			if (lbl != null)
+			{
+				lbl.setText(String.valueOf(shown));
+			}
+			active |= shown != target;
+		}
+		for (java.util.Map.Entry<Integer, JLabel> en : battleTileLabel.entrySet())
+		{
+			int w = en.getKey();
+			if (w == battleCurrentWorld)
+			{
+				continue; // my own world snaps instantly in retargetBattles - never eased
+			}
+			JLabel lbl = en.getValue();
+			long[] shown = battleShown.get(w);
+			long[] target = battleTarget.get(w);
+			if (shown == null || target == null
+					|| (shown[0] == target[0] && shown[1] == target[1] && shown[2] == target[2]))
+			{
+				continue;
+			}
+			shown[0] = easeStep(shown[0], target[0]);
+			shown[1] = easeStep(shown[1], target[1]);
+			shown[2] = easeStep(shown[2], target[2]);
+			if (lbl != null)
+			{
+				lbl.setText(battleTilesHtml(shown[0], shown[1], Boolean.TRUE.equals(battleContested.get(w))));
+			}
+			VerticalBattleBorder bd = battleBorder.get(w);
+			if (bd != null)
+			{
+				bd.setTiles((int) shown[0], (int) shown[1], (int) shown[2]); // roll the bar heights with the numbers
+				JComponent rc = battleRowComp.get(w);
+				if (rc != null)
+				{
+					rc.repaint();
+				}
+			}
+			active |= shown[0] != target[0] || shown[1] != target[1] || shown[2] != target[2];
+		}
+		if (!active && lbAnimTimer != null)
+		{
+			lbAnimTimer.stop();
+		}
+	}
+
+	/**
+	 * A tile the local player just claimed: bump the live local count and re-run the leaderboard, which retargets
+	 * my counter and my row so they ease up, and only rebuilds the rows if my rank actually changed.
+	 */
+	void bumpMineTiles(int daily, int weekly)
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			lbDaily = daily;
+			lbWeekly = weekly;
+			applyMineLabel();     // instant local counter, even if the board itself doesn't rebuild this claim
+			renderLeaderboard();  // snap my row to the new count + re-rank; only rebuilds rows if my rank changed
+		});
 	}
 
 	/** Start (or keep running) the shared timer that eases the "Your tiles" number colors toward their targets. */
