@@ -182,7 +182,6 @@ class ClanTurfPanel extends PluginPanel
 	private Consumer<Integer> onChangeIcon;                 // owner: set the alliance symbol
 	private Consumer<Integer> onChangeHomeWorld;            // owner: set the alliance home world
 	private final JLabel allianceHomeLabel = new JLabel();  // "Home World: NNN" under the name in Alliance Tools
-	private int allianceHomeWorldValue;                     // current alliance home world (0 = unset)
 
 	private java.util.function.ToIntFunction<String> homeWorldLookup; // alliance display name -> home world, for the drawer
 	private final JPanel allianceMembersList = new JPanel(); // owner view: member rows, each with a kick X
@@ -260,23 +259,18 @@ class ClanTurfPanel extends PluginPanel
 	private static final int LB_PAGE_SIZE = 10; // rows per page (testing value; bump once pagination is proven)
 	// v9 palette (from the promo source; keep hexes exact, scale sizes to the ~225px sidebar). One place so every
 	// section pulls the same tokens. See "Clan Turf v9 Style Guide".
-	static final Color PANEL_BG = new Color(0x1e1e1e);  // (unused now; we use RuneLite's default panel bg)
 	// Zebra row/card fills. RuneLite's default panel bg is ~#282828, so both shades sit LIGHTER than it - the rows
 	// raise off the default background and the gaps between them show that default bg.
 	static final Color ROW_A = new Color(0x363636);     // lighter shade (row 0)
 	static final Color ROW_B = new Color(0x2f2f2f);     // darker shade
 	static final Color TAB_ON = new Color(0x3c3c3c);    // selected tab/page background
 	static final Color TAB_OFF = new Color(0x232323);   // unselected tab/page background
-	static final Color V9_BORDER = new Color(0x3c3c3c); // 1px card/panel outlines
 	static final Color ACCENT = new Color(0xff981f);    // selected underline, headers, your-row stripe
-	static final Color V9_TEXT = new Color(0xf5f2ea);   // main text
 	static final Color TEXT_DIM = new Color(0xa59fb2);  // unselected tab text, labels
 	static final Color TEXT_MUTED = new Color(0x9a9a9a); // "vs", column headers, opted-out note
 	static final Color RANK_1 = new Color(0xff6ad5);    // 1st place pink
 	static final Color RANK_2 = new Color(0x4fb3ff);    // 2nd place blue
 	static final Color RANK_3 = new Color(0x5cff7a);    // 3rd place green
-	static final Color VALUE = new Color(0xffff00);     // tile counts on the leaderboard
-	static final Color YOU_BG = new Color(0x3a2a12);    // your-row highlight background
 
 	// Podium colors for the top 3 leaderboard rows (used for both the 1px frame and the row text). Now the v9
 	// RANK_1/2/3 hexes from the promo (pink / blue / green), run through the color-blind transform at use sites.
@@ -3769,7 +3763,6 @@ class ClanTurfPanel extends PluginPanel
 	/** Set the alliance home world shown under the name in Alliance Tools (0 = unset, hides the label). */
 	void setAllianceHomeWorld(int world)
 	{
-		allianceHomeWorldValue = world;
 		if (world > 0)
 		{
 			allianceHomeLabel.setText("<html>Home World:<br>" + world + "</html>");
@@ -4343,20 +4336,6 @@ class ClanTurfPanel extends PluginPanel
 			}
 		}
 		return true;
-	}
-
-	/** A left-aligned horizontal row of a fixed-size swatch/control and a stretchy control beside it. */
-	private static JPanel row(Component a, Component b)
-	{
-		JPanel p = new JPanel();
-		p.setLayout(new BoxLayout(p, BoxLayout.X_AXIS));
-		p.setOpaque(false);
-		p.setAlignmentX(Component.LEFT_ALIGNMENT);
-		p.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-		p.add(a);
-		p.add(Box.createHorizontalStrut(6));
-		p.add(b);
-		return p;
 	}
 
 	private static String hex6(Color c)
