@@ -247,6 +247,10 @@ class ClanTurfPanel extends PluginPanel
 	// clan board sortable by daily or weekly total. Server-mode only.
 	private final JLabel leaderboardHeader = new JLabel("Leaderboards");
 	private final JPanel leaderboardBox = new JPanel();
+	private final JPanel lbRowsPanel = new JPanel(); // just the zebra rows + pager; rebuilt alone on a rank swap so
+	// the counter/tabs/title/sort-bar chrome around them doesn't flash. Chrome and rows have separate rebuild guards.
+	private String lastChromeSig = "\u0000";
+	private String lastRowsSig = "\u0000";
 	private boolean leaderboardCollapsed = false; // starts expanded (like Active battles); the board shows right away
 	private boolean leaderboardOnline = false;
 
@@ -320,7 +324,6 @@ class ClanTurfPanel extends PluginPanel
 	private String lbMyName;
 	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoard = java.util.Collections.emptyList();
 	private java.util.List<ClanTurfStore.LeaderboardEntry> lbBoardAll = java.util.Collections.emptyList();
-	private String lastLbSig = ""; // skip the rebuild (and its flicker) when nothing displayed has changed
 	// {versionTitle, bodyHtml} per version, newest first, for the collapsible "What's New" dialog.
 	private java.util.List<String[]> changelogSections = java.util.Collections.emptyList();
 	private String changelogTitle = "Clan Turf"; // dialog title bar; set to "Clan Turf <version>" via setChangelog
@@ -1910,26 +1913,45 @@ class ClanTurfPanel extends PluginPanel
 		@Override
 		public void paintBorder(Component c, Graphics g, int x, int y, int w, int h)
 		{
-			// Each bar reflects that clan's ownership of the whole GE, so the owner's bar is only full if they
-			// hold every tile (90% ownership -> 90% bar), not just relative to the challenger.
+			// Each bar reflects that clan's ownership of the whole GE, so a bar is only full if they hold every tile
+			// (90% ownership -> 90% bar), not just relative to the other clan.
 			int denom = totalTiles > 0 ? totalTiles : Math.max(1, leaderTiles + challengerTiles);
-			int lh = Math.round(h * Math.min(leaderTiles, denom) / (float) denom);
-			if (leaderTiles > 0)
+			int leftSlot = x;
+			int rightSlot = x + BAR_W + 1; // 1px gap between the two bars
+			if (challenger == null)
 			{
-				lh = Math.max(lh, 2);
+				// Solo world: a single bar, hugging the content on the right (closest to the world number).
+				drawBar(g, rightSlot, y, h, barHeight(leaderTiles, denom, h), leader);
+				return;
 			}
-			g.setColor(leader);
-			g.fillRect(x, y + (h - lh), BAR_W, lh); // owner bar, bottom-anchored
-			if (challenger != null)
+			// Contested: the clan with MORE tiles sits on the RIGHT (closest to the world). Ordered by the CURRENT
+			// animated counts, so the bars swap exactly when the on-screen numbers cross - not when the server
+			// reports an ownership flip. setTiles() feeds this the same shown values the count-up rolls to.
+			int lh = barHeight(leaderTiles, denom, h);
+			int ch = barHeight(challengerTiles, denom, h);
+			if (leaderTiles >= challengerTiles)
 			{
-				int ch = Math.round(h * Math.min(challengerTiles, denom) / (float) denom);
-				if (challengerTiles > 0)
-				{
-					ch = Math.max(ch, 2); // keep a sliver visible even for a tiny challenger
-				}
-				g.setColor(challenger);
-				g.fillRect(x + BAR_W + 1, y + (h - ch), BAR_W, ch); // challenger bar, 1px gap, bottom-anchored
+				drawBar(g, rightSlot, y, h, lh, leader);
+				drawBar(g, leftSlot, y, h, ch, challenger);
 			}
+			else
+			{
+				drawBar(g, rightSlot, y, h, ch, challenger);
+				drawBar(g, leftSlot, y, h, lh, leader);
+			}
+		}
+
+		/** A clan's bar height: its share of the whole GE, with a 2px floor so a tiny-but-nonzero holding still shows. */
+		private static int barHeight(int tiles, int denom, int h)
+		{
+			int bh = Math.round(h * Math.min(tiles, denom) / (float) denom);
+			return tiles > 0 ? Math.max(bh, 2) : bh;
+		}
+
+		private void drawBar(Graphics g, int bx, int y, int h, int bh, Color color)
+		{
+			g.setColor(color);
+			g.fillRect(bx, y + (h - bh), BAR_W, bh); // bottom-anchored
 		}
 
 		@Override
@@ -2254,6 +2276,9 @@ class ClanTurfPanel extends PluginPanel
 		leaderboardBox.setLayout(new BoxLayout(leaderboardBox, BoxLayout.Y_AXIS));
 		leaderboardBox.setOpaque(false);
 		leaderboardBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+		lbRowsPanel.setLayout(new BoxLayout(lbRowsPanel, BoxLayout.Y_AXIS));
+		lbRowsPanel.setOpaque(false);
+		lbRowsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		leaderboardBox.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 		leaderboardHeader.setVisible(false);
 		leaderboardBox.setVisible(false);
@@ -2372,49 +2397,11 @@ class ClanTurfPanel extends PluginPanel
 		Color myDailyMedal = myPodiumColor(false);
 		Color myWeeklyMedal = myPodiumColor(true);
 
-		StringBuilder sig = new StringBuilder();
-		// Structure-only signature: rebuild the rows when the ORDER / roster / page / scope / medals change, but
-		// NOT when a count merely ticks - those animate in place via tickLbAnim (otherwise a rebuild would snap them).
-		sig.append(lbShow).append('|').append(leaderboardCollapsed).append('|').append(lbSort)
-				.append('|').append(lbScope).append('|').append(lbPage)
-				.append('|').append(lbOptedIn)
-				.append('|').append(lbReady).append('|').append(lbMyName).append('|').append(lbClanName)
-				.append('|').append(lbDayWinner).append('|').append(lbWeekWinner)
-				.append('|').append(lbDayWinnerAll).append('|').append(lbWeekWinnerAll)
-				.append('|').append(lbDayWinnerVal).append('|').append(lbWeekWinnerVal)
-				.append('|').append(lbDayWinnerAllVal).append('|').append(lbWeekWinnerAllVal)
-				.append('|').append(myDailyMedal).append('|').append(myWeeklyMedal)
-				// Color-blind mode proxy: when the toggle changes, the adjusted medal color changes, so the whole
-				// board (podium row colors included) re-renders to pick up the new transform.
-				.append('|').append(ClanTurfColors.colorblind(MEDAL_FIRST).getRGB());
-		for (ClanTurfStore.LeaderboardEntry e : sorted)
-		{
-			// Name + icon only, no value: order changes rebuild (the name sequence shifts), value ticks animate.
-			sig.append('#').append(e.name).append(lbRankIcons.containsKey(e.name) ? 'I' : '-');
-		}
-		String s = sig.toString();
-		if (s.equals(lastLbSig))
-		{
-			return; // nothing displayed changed - leave the components in place, no flicker
-		}
-		lastLbSig = s;
-
-		leaderboardHeader.setVisible(lbShow);
-		leaderboardBox.setVisible(lbShow); // box stays visible online; collapse hides only the board part
-		leaderboardHeader.setText("Leaderboards");
-		setCollapseArrow(leaderboardHeader, leaderboardCollapsed);
-		leaderboardBox.removeAll();
-		if (!lbShow)
-		{
-			leaderboardBox.revalidate();
-			leaderboardBox.repaint();
-			return;
-		}
-
-		// Your own counter - always shown, even when collapsed. A PERSISTENT label (created once, re-added each
-		// rebuild) so its Today / This week numbers can fade their color to and from your podium medal color as
-		// your rank changes - on first load, and when you switch between the All and Clan tabs.
 		String gray = hex(ColorScheme.LIGHT_GRAY_COLOR);
+		boolean empty = visible.isEmpty();
+
+		// Keep the persistent "Your tiles" counter and its medal-color fade current every render, independent of the
+		// rebuilds below - so your own counter and its color update even when neither the chrome nor the rows rebuild.
 		if (mineLabel == null)
 		{
 			mineLabel = new JLabel();
@@ -2431,18 +2418,82 @@ class ClanTurfPanel extends PluginPanel
 			mineWeeklyFrom = mineWeeklyCur;
 			mineDailyTarget = dTarget;
 			mineWeeklyTarget = wTarget;
-			// First load: hold the color fade until the row cascade has played; later changes start immediately.
 			long cascadeMs = lbCascadedOnce ? 0 : pageRows * REVEAL_ROW_STAGGER + REVEAL_FADE_MS;
 			mineColorStartMs = System.currentTimeMillis() + cascadeMs;
 			startMineColorFade();
 		}
 		applyMineLabel();
-		leaderboardBox.add(mineLabel);
 
+		// Two rebuild guards so a rank swap only rebuilds the ROW list, not the whole section (which flashes). CHROME
+		// = the static frame (counter, tabs, title, previous winner, sort bar). ROWS = the ordered name/icon sequence.
+		String chromeSig = lbShow + "|" + leaderboardCollapsed + "|" + lbSort + "|" + lbScope + "|" + lbOptedIn + "|"
+				+ lbReady + "|" + lbClanName + "|" + lbDayWinner + "|" + lbWeekWinner + "|" + lbDayWinnerAll + "|"
+				+ lbWeekWinnerAll + "|" + lbDayWinnerVal + "|" + lbWeekWinnerVal + "|" + lbDayWinnerAllVal + "|"
+				+ lbWeekWinnerAllVal + "|" + empty + "|" + leaderboardDateText()
+				+ "|" + ClanTurfColors.colorblind(MEDAL_FIRST).getRGB(); // color-blind toggle recolors the clan title too
+		StringBuilder rb = new StringBuilder();
+		rb.append(lbShow).append('|').append(leaderboardCollapsed).append('|').append(empty).append('|')
+				.append(lbPage).append('|').append(pageCount).append('|').append(lbScope).append('|')
+				.append(lbSort).append('|').append(lbMyName).append('|').append(lbReady)
+				.append('|').append(ClanTurfColors.colorblind(MEDAL_FIRST).getRGB());
+		for (ClanTurfStore.LeaderboardEntry e : sorted)
+		{
+			// Name + icon only, no value: order changes rebuild (the name sequence shifts), value ticks animate.
+			rb.append('#').append(e.name).append(lbRankIcons.containsKey(e.name) ? 'I' : '-');
+		}
+		String rowsSig = rb.toString();
+
+		boolean chromeChanged = !chromeSig.equals(lastChromeSig);
+		boolean rowsChanged = !rowsSig.equals(lastRowsSig);
+		if (!chromeChanged && !rowsChanged)
+		{
+			return; // nothing displayed changed - no rebuild, no flicker
+		}
+		lastChromeSig = chromeSig;
+		lastRowsSig = rowsSig;
+
+		leaderboardHeader.setVisible(lbShow);
+		leaderboardBox.setVisible(lbShow); // box stays visible online; collapse hides only the board part
+		leaderboardHeader.setText("Leaderboards");
+		setCollapseArrow(leaderboardHeader, leaderboardCollapsed);
+
+		if (chromeChanged)
+		{
+			rebuildLbChrome(lbShow, gray);
+		}
+		// Rows live in the persistent lbRowsPanel; rebuild them on an order/page change, or when the chrome was just
+		// rebuilt (which re-adds an empty rows panel that needs refilling).
+		if (lbShow && lbReady && !leaderboardCollapsed && (chromeChanged || rowsChanged))
+		{
+			rebuildLbRows(visible, pageCount, sorted.isEmpty());
+		}
+		leaderboardBox.revalidate();
+		leaderboardBox.repaint();
+	}
+
+	/** Rebuild the static chrome of the Leaderboards section (counter, tabs, title, previous winner, sort bar) and
+	 *  slot in the persistent {@link #lbRowsPanel}. Runs only when the chrome changes - never on a plain rank swap. */
+	private void rebuildLbChrome(boolean lbShow, String gray)
+	{
+		leaderboardBox.removeAll();
+		if (!lbShow)
+		{
+			return;
+		}
+		if (!lbReady)
+		{
+			// Board not loaded yet: show ONLY the loading line - the counter, tabs, winner, sort bar and rows all
+			// stay hidden until the real board arrives, so nothing half-populated flashes up first.
+			JLabel loading = new JLabel("<html><body style='width:170px'>Loading leaderboards…</body></html>");
+			loading.setFont(FontManager.getRunescapeSmallFont());
+			loading.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			loading.setAlignmentX(Component.LEFT_ALIGNMENT);
+			leaderboardBox.add(loading);
+			return;
+		}
+		leaderboardBox.add(mineLabel); // persistent counter, shown even when collapsed
 		if (leaderboardCollapsed)
 		{
-			leaderboardBox.revalidate();
-			leaderboardBox.repaint();
 			return; // collapsed: only your personal line shows; the sort bar and board are hidden
 		}
 
@@ -2534,23 +2585,31 @@ class ClanTurfPanel extends PluginPanel
 		leaderboardBox.add(bar);
 		leaderboardBox.add(thinDivider());
 		leaderboardBox.add(Box.createVerticalStrut(4));
+		leaderboardBox.add(lbRowsPanel); // the zebra rows + pager live here, rebuilt alone on a rank swap
+	}
 
+	/** Rebuild just the row list (zebra strips + pager, or the empty-state message) into {@link #lbRowsPanel} - the
+	 *  only thing torn down on a rank swap, so the swap no longer flashes the counter/tabs/title above. */
+	private void rebuildLbRows(java.util.List<ClanTurfStore.LeaderboardEntry> visible, int pageCount,
+			boolean sortedEmpty)
+	{
+		lbRowsPanel.removeAll();
+		lbRowLabel.clear(); // re-registered below for the rows on this page, so the animator drives the live labels
 		if (visible.isEmpty())
 		{
-			// Reached only when opted in (the not-opted-in case is gated above). Distinguish "no one opted in" from
-			// "people are opted in but no one has any tiles this period yet" (the board hides zero-tile players).
+			// Distinguish "no one opted in" from "people are opted in but no one has tiles this period yet".
 			String period = lbSort == LbSort.WEEKLY ? "this week" : "today";
 			String msg = !lbReady ? "Loading leaderboards…"
-					: !sorted.isEmpty() ? "No tiles claimed " + period + " yet."
+					: !sortedEmpty ? "No tiles claimed " + period + " yet."
 					: lbScope == LbScope.CLAN ? "No one in your clan has opted in yet."
 					: "No one has opted in yet.";
 			JLabel none = new JLabel("<html><body style='width:170px'>" + escape(msg) + "</body></html>");
 			none.setFont(FontManager.getRunescapeSmallFont());
 			none.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 			none.setAlignmentX(Component.LEFT_ALIGNMENT);
-			leaderboardBox.add(none);
-			leaderboardBox.revalidate();
-			leaderboardBox.repaint();
+			lbRowsPanel.add(none);
+			lbRowsPanel.revalidate();
+			lbRowsPanel.repaint();
 			return;
 		}
 
@@ -2560,7 +2619,6 @@ class ClanTurfPanel extends PluginPanel
 		int to = Math.min(from + LB_PAGE_SIZE, visible.size());
 		boolean cascade = !lbCascadedOnce; // rows fade in top-down only on the first load this session
 		long cascadeBase = System.currentTimeMillis();
-		lbRowLabel.clear(); // re-registered below for the rows on this page, so the animator drives the live labels
 		for (int i = from; i < to; i++)
 		{
 			ClanTurfStore.LeaderboardEntry e = visible.get(i);
@@ -2633,10 +2691,10 @@ class ClanTurfPanel extends PluginPanel
 			{
 				scheduleReveal(row, cascadeBase + (i - from) * REVEAL_ROW_STAGGER); // top-down cascade
 			}
-			leaderboardBox.add(row);
+			lbRowsPanel.add(row);
 			if (i < to - 1)
 			{
-				leaderboardBox.add(Box.createVerticalStrut(2)); // 2px PANEL_BG gap between zebra strips
+				lbRowsPanel.add(Box.createVerticalStrut(2)); // 2px PANEL_BG gap between zebra strips
 			}
 		}
 		lbCascadedOnce = true; // only the first board render cascades; tab switches and polls render instantly
@@ -2645,10 +2703,10 @@ class ClanTurfPanel extends PluginPanel
 		// from the last row above.
 		if (pageCount > 1)
 		{
-			leaderboardBox.add(Box.createVerticalStrut(5));
-			leaderboardBox.add(thinDivider());
-			leaderboardBox.add(Box.createVerticalStrut(4));
-			leaderboardBox.add(buildPager(lbPage, pageCount, pg ->
+			lbRowsPanel.add(Box.createVerticalStrut(5));
+			lbRowsPanel.add(thinDivider());
+			lbRowsPanel.add(Box.createVerticalStrut(4));
+			lbRowsPanel.add(buildPager(lbPage, pageCount, pg ->
 			{
 				lbPage = pg;
 				lbCascadedOnce = false; // re-cascade on a page change
@@ -2658,8 +2716,8 @@ class ClanTurfPanel extends PluginPanel
 			}));
 		}
 
-		leaderboardBox.revalidate();
-		leaderboardBox.repaint();
+		lbRowsPanel.revalidate();
+		lbRowsPanel.repaint();
 	}
 
 	/** Medal color for the local player's rank on the ACTIVE board (All or Clan tab) for the given period, or null

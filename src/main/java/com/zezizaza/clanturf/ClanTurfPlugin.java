@@ -295,19 +295,24 @@ public class ClanTurfPlugin extends Plugin
 
 	/** Bump this when a new update changelog should be shown; anyone whose stored "lastUpdateSeen"
 	 *  differs gets these lines printed once on their next login. */
-	private static final String UPDATE_ID = "v9";
+	private static final String UPDATE_ID = "v10";
 	/** URL to the home-world icon resource, for inline display in the changelog dialog's [HWICON] token. */
 	private static final java.net.URL HW_ICON_URL = ClanTurfPlugin.class.getResource("homeworld_icon.png");
 	/** DEV ONLY: while true, the changelog shows on every login and is never marked as seen, for
 	 *  testing the look. SET THIS TO false BEFORE RELEASING. */
 	private static final boolean ALWAYS_SHOW_UPDATE = false;
-	/** Header label. Kept as "[Update]" for now. Set to null in a future release to auto-use the
-	 *  Hub-built jar version instead (see updateMessage()). */
-	private static final String UPDATE_LABEL = "[Update]";
+	/** Header label shown after "Clan Turf " in the login message. Ties to UPDATE_ID so it reads the version you
+	 *  just bumped (e.g. "Clan Turf v10") in both dev and release, instead of a "[Update]" placeholder. */
+	private static final String UPDATE_LABEL = "[" + UPDATE_ID + "]";
 	/** Full version history, newest first. Element [0] of each row is the version tag; the rest are that
 	 *  version's lines. The in-game changelog uses the newest entry; the panel's "What's New" dialog shows
 	 *  all of them, so anyone who missed a login message can still read the history. */
 	private static final String[][] CHANGELOG = {
+		{"V10 - Tile Updates",
+			"New: your tile counts update live. Your Today and This week totals, and your spot on the leaderboard, now climb the instant you claim a tile instead of waiting on the server.",
+			"New: everyone else rolls in. Other players' leaderboard totals and the Active Battles tile counts now count up smoothly when they change, the same way the Community Claims total does, instead of popping to the new number.",
+			"New look for Active Battles: the share bars now grow in step with their numbers, and the clan in the lead always sits on the right, next to the world.",
+			"Fixed: the leaderboard no longer flashes the whole section when your rank changes - only the rows that move redraw."},
 		{"V9 - Alliance Icon Overhaul + UI Polish",
 			"New: alliance symbols are now shaded in your alliance's color instead of a flat wash. Each symbol keeps its black outline and is recolored pixel by pixel, so it reads like a proper crest wherever it shows.",
 			"New: creating or opting into an alliance plays a short evolve animation. A white silhouette grows and bursts into your alliance color. Creating a brand-new alliance plays the full white-to-color version; opting into one you already have plays the colored version.",
@@ -356,9 +361,9 @@ public class ClanTurfPlugin extends Plugin
 	// Short bullets for the in-game login message (kept brief on purpose). The side-panel "Changelog" dialog
 	// shows the full, detailed CHANGELOG above instead. Update this alongside CHANGELOG[0] each release.
 	private static final String[] UPDATE_SUMMARY = {
-		"New: alliance symbols are now shaded in your alliance color, with an evolve animation when you create or opt in.",
-		"New look for the Leaderboards and Active Battles - zebra rows, a stripe on your row, and vertical share bars.",
-		"The takeover glow now flickers with the wall in your alliance color.",
+		"New: your tiles and your leaderboard spot now update live as you claim, no waiting on the server.",
+		"New: other players' and Active Battles counts now roll up smoothly instead of popping.",
+		"Fixed: leaderboard no longer flashes when updating.",
 	};
 	private static final String[] UPDATE_LINES = UPDATE_SUMMARY;
 
